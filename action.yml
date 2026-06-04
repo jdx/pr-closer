@@ -1,0 +1,36 @@
+name: PR Closer
+description: Warn and close pull requests with failing checks or merge conflicts.
+author: jdx
+
+inputs:
+  close-after-days:
+    description: Number of consecutive warning days before a pull request is closed.
+    default: "7"
+  ignored-author:
+    description: Pull request author to ignore.
+    default: jdx
+  ignored-label:
+    description: Pull request label to ignore.
+    default: keep-open
+  github-token:
+    description: GitHub token used to list, comment on, and close pull requests.
+  limit:
+    description: Maximum number of open pull requests to inspect.
+    default: "500"
+  dry-run:
+    description: Log actions without commenting on or closing pull requests.
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Warn and close stale pull requests
+      shell: bash
+      env:
+        CLOSE_AFTER_DAYS: ${{ inputs.close-after-days }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        GH_TOKEN: ${{ inputs.github-token || github.token }}
+        IGNORED_AUTHOR: ${{ inputs.ignored-author }}
+        IGNORED_LABEL: ${{ inputs.ignored-label }}
+        LIMIT: ${{ inputs.limit }}
+      run: ${{ github.action_path }}/src/pr-closer.sh
