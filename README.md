@@ -40,7 +40,7 @@ jobs:
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `close-after-days` | `7` | Number of consecutive warning days before a pull request is closed. |
+| `close-after-days` | `7` | Number of calendar days after the first warning before a pull request is closed. |
 | `ignored-author` | `jdx` | Pull request author to ignore. |
 | `ignored-label` | `keep-open` | Pull request label to ignore. |
 | `github-token` | `${{ github.token }}` | Token used to list, comment on, and close pull requests. |
@@ -51,9 +51,9 @@ jobs:
 
 Every run inspects open pull requests, skipping the configured author and label. If a pull request has failing checks, merge conflicts, or both, the action comments once per day.
 
-Warnings are tracked with a hidden marker in the comment body and are tied to the pull request head SHA. Pushing new commits resets the warning window. If warnings are interrupted for a day, the consecutive-day count resets.
+Warnings are tracked with a hidden marker in the comment body and are tied to the pull request head SHA. Pushing new commits resets the warning window. Missed or delayed scheduled runs do not reset the warning window.
 
-After the configured number of consecutive warning days, the action closes the pull request with a final comment.
+After the configured number of calendar days from the first warning, the action closes the pull request with a final comment.
 
 ## Requirements
 

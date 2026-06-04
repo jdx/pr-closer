@@ -81,25 +81,16 @@ while IFS=$'\t' read -r pr head_sha reason; do
     | .date
   ' <<< "$comments" | sort -u)
 
-  warning_days=0
+  warning_day=1
   if [[ -n "$warning_dates" ]]; then
-    yesterday=$(date -u -d "$TODAY - 1 day" +%Y-%m-%d)
-    latest_warning=$(tail -n 1 <<< "$warning_dates")
-    if [[ "$latest_warning" == "$TODAY" || "$latest_warning" == "$yesterday" ]]; then
-      oldest_consecutive="$latest_warning"
-      cursor="$latest_warning"
-      while previous_day=$(date -u -d "$cursor - 1 day" +%Y-%m-%d); grep -qx "$previous_day" <<< "$warning_dates"; do
-        oldest_consecutive="$previous_day"
-        cursor="$previous_day"
-      done
-      warning_days=$(( ($(date -u -d "$latest_warning" +%s) - $(date -u -d "$oldest_consecutive" +%s)) / 86400 + 1 ))
-    fi
+    first_warning=$(head -n 1 <<< "$warning_dates")
+    warning_day=$(( ($(date -u -d "$TODAY" +%s) - $(date -u -d "$first_warning" +%s)) / 86400 + 1 ))
   fi
 
-  if (( warning_days >= CLOSE_AFTER_DAYS )); then
-    echo "Closing PR #$pr ($reason for $warning_days consecutive warning days)"
+  if (( warning_day > CLOSE_AFTER_DAYS )); then
+    echo "Closing PR #$pr ($reason for $CLOSE_AFTER_DAYS days)"
     close_pr "$pr" "$(cat <<EOF
-This PR has had $reason for $warning_days consecutive warning days, so it is being closed automatically.
+This PR has had $reason for more than $CLOSE_AFTER_DAYS days, so it is being closed automatically.
 
 Feel free to reopen or create a new PR if you'd like to continue working on this.
 
@@ -116,7 +107,7 @@ EOF
     comment_pr "$pr" "$(cat <<EOF
 This PR currently has $reason. If this continues for $CLOSE_AFTER_DAYS days, it will be closed automatically.
 
-This is warning day $((warning_days + 1)) of $CLOSE_AFTER_DAYS.
+This is warning day $warning_day of $CLOSE_AFTER_DAYS.
 
 Please update the PR when you have a chance. Feel free to reopen or create a new PR if it is closed and you'd like to continue working on it.
 
