@@ -1,4 +1,4 @@
-tasks.release-plz = "./scripts/release-plz.sh"
+tasks.release-plz = "bash scripts/release-plz.sh"
 
 [tools]
 gh = "2.93.0"
