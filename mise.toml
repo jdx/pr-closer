@@ -1,0 +1,5 @@
+tasks.release-plz = "./scripts/release-plz.sh"
+
+[tools]
+gh = "2.93.0"
+git-cliff = "2.13.1"
