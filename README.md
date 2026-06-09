@@ -75,6 +75,14 @@ permissions:
 
 The action uses the GitHub CLI and `jq`, both of which are available on `ubuntu-latest`.
 
+## Releasing
+
+The `release-plz` workflow runs after pushes to `main`. When there are unreleased changes, it updates `VERSION` on the `release` branch and opens or updates a pull request with the `release` label. The workflow uses `RELEASE_PLZ_GITHUB_TOKEN` so the generated pull request can trigger the release workflow when merged.
+
+When a release pull request is merged, the release workflow creates the exact version tag, updates the major tag, and creates a GitHub release.
+
+The workflow can also be run manually with an optional version input.
+
 ## License
 
 MIT
