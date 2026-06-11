@@ -35,8 +35,11 @@ jobs:
   with:
     close-after-days: 7
     max-age-days: 30
-    ignored-author: jdx
-    ignored-label: keep-open
+    ignored-authors: |
+      jdx
+      dependabot[bot]
+      renovate[bot]
+    ignored-labels: keep-open
     limit: 500
     dry-run: false
 ```
@@ -45,15 +48,17 @@ jobs:
 | --- | --- | --- |
 | `close-after-days` | `7` | Number of calendar days after the first warning before a pull request with failing checks or merge conflicts is closed. |
 | `max-age-days` | `30` | Number of full days an otherwise healthy pull request with settled checks can remain open before it is closed. |
-| `ignored-author` | `jdx` | Pull request author to ignore. |
-| `ignored-label` | `keep-open` | Pull request label to ignore. |
+| `ignored-authors` | `jdx`, `dependabot[bot]`, `renovate[bot]` | Comma-separated or newline-separated pull request authors to ignore. |
+| `ignored-author` | | Additional pull request author to ignore. Prefer `ignored-authors` for multiple authors. |
+| `ignored-labels` | `keep-open` | Comma-separated or newline-separated pull request labels to ignore. |
+| `ignored-label` | | Additional pull request label to ignore. Prefer `ignored-labels` for multiple labels. |
 | `github-token` | `${{ github.token }}` | Token used to list, comment on, and close pull requests. |
 | `limit` | `500` | Maximum number of open pull requests to inspect. |
 | `dry-run` | `false` | Log actions without commenting on or closing pull requests. |
 
 ## Behavior
 
-Every run inspects open pull requests, skipping the configured author and label.
+Every run inspects open pull requests, skipping the configured authors and labels.
 
 If a pull request has failing checks, merge conflicts, or both, the action comments once per day. Warnings are tracked with a hidden marker in the comment body and are tied to the pull request head SHA. Pushing new commits resets the warning window. Missed or delayed scheduled runs do not reset the warning window.
 

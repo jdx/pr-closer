@@ -10,10 +10,17 @@ inputs:
     description: Number of full days an otherwise healthy pull request with settled checks can remain open before it is closed.
     default: "30"
   ignored-author:
-    description: Pull request author to ignore.
-    default: jdx
+    description: Additional pull request author to ignore. Prefer ignored-authors for multiple authors.
+  ignored-authors:
+    description: Comma-separated or newline-separated pull request authors to ignore.
+    default: |-
+      jdx
+      dependabot[bot]
+      renovate[bot]
   ignored-label:
-    description: Pull request label to ignore.
+    description: Additional pull request label to ignore. Prefer ignored-labels for multiple labels.
+  ignored-labels:
+    description: Comma-separated or newline-separated pull request labels to ignore.
     default: keep-open
   github-token:
     description: GitHub token used to list, comment on, and close pull requests.
@@ -34,7 +41,9 @@ runs:
         DRY_RUN: ${{ inputs.dry-run }}
         GH_TOKEN: ${{ inputs.github-token || github.token }}
         IGNORED_AUTHOR: ${{ inputs.ignored-author }}
+        IGNORED_AUTHORS: ${{ inputs.ignored-authors }}
         IGNORED_LABEL: ${{ inputs.ignored-label }}
+        IGNORED_LABELS: ${{ inputs.ignored-labels }}
         LIMIT: ${{ inputs.limit }}
         MAX_AGE_DAYS: ${{ inputs.max-age-days }}
       run: ${{ github.action_path }}/src/pr-closer.sh

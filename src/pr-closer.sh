@@ -6,8 +6,11 @@ set -euo pipefail
 
 CLOSE_AFTER_DAYS="${CLOSE_AFTER_DAYS:-7}"
 DRY_RUN="${DRY_RUN:-false}"
-IGNORED_AUTHOR="${IGNORED_AUTHOR:-jdx}"
-IGNORED_LABEL="${IGNORED_LABEL:-keep-open}"
+IGNORED_AUTHOR="${IGNORED_AUTHOR:-}"
+DEFAULT_IGNORED_AUTHORS="$(printf 'jdx\ndependabot[bot]\nrenovate[bot]')"
+IGNORED_AUTHORS="${IGNORED_AUTHORS:-$DEFAULT_IGNORED_AUTHORS}"
+IGNORED_LABEL="${IGNORED_LABEL:-}"
+IGNORED_LABELS="${IGNORED_LABELS:-keep-open}"
 LIMIT="${LIMIT:-500}"
 MAX_AGE_DAYS="${MAX_AGE_DAYS:-30}"
 NOW="${NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
@@ -129,8 +132,26 @@ EOF
 )"
 }
 
+append_search_exclusions() {
+  local field="$1"
+  local values="$2"
+
+  tr ',' '\n' <<< "$values" | while IFS= read -r value; do
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    [[ -n "$value" ]] || continue
+    printf -- ' -%s:"%s"' "$field" "$value"
+  done
+}
+
 cutoff_epoch="$(date -u -d "$NOW -$MAX_AGE_DAYS days" +%s)"
-pr_search="-author:$IGNORED_AUTHOR -label:$IGNORED_LABEL sort:updated-asc"
+pr_search="$(
+  printf 'sort:updated-asc'
+  append_search_exclusions author "$IGNORED_AUTHORS"
+  append_search_exclusions author "$IGNORED_AUTHOR"
+  append_search_exclusions label "$IGNORED_LABELS"
+  append_search_exclusions label "$IGNORED_LABEL"
+)"
 
 gh pr list \
   -R "$GITHUB_REPOSITORY" \
@@ -158,7 +179,7 @@ jq -r '
     end
   | @tsv
 ' | \
-while IFS=$'\t' read -r pr head_sha created_at state reason; do
+while IFS="$(printf '\t')" read -r pr head_sha created_at state reason; do
   if [[ "$state" == "broken" ]]; then
     warn_or_close_broken_pr "$pr" "$head_sha" "$reason"
   elif [[ "$state" == "pending" ]]; then
