@@ -37,6 +37,7 @@ jobs:
     max-age-days: 30
     ignored-authors: |
       jdx
+      mise-en-dev
       dependabot[bot]
       renovate[bot]
     ignored-labels: keep-open
@@ -48,7 +49,7 @@ jobs:
 | --- | --- | --- |
 | `close-after-days` | `7` | Number of calendar days after the first warning before a pull request with failing checks or merge conflicts is closed. |
 | `max-age-days` | `30` | Number of full days an otherwise healthy pull request with settled checks can remain open before it is closed. |
-| `ignored-authors` | `jdx`, `dependabot[bot]`, `renovate[bot]` | Comma-separated or newline-separated pull request authors to ignore. |
+| `ignored-authors` | `jdx`, `mise-en-dev`, `dependabot[bot]`, `renovate[bot]` | Comma-separated or newline-separated pull request authors to ignore. |
 | `ignored-author` | | Additional pull request author to ignore. Prefer `ignored-authors` for multiple authors. |
 | `ignored-labels` | `keep-open` | Comma-separated or newline-separated pull request labels to ignore. |
 | `ignored-label` | | Additional pull request label to ignore. Prefer `ignored-labels` for multiple labels. |

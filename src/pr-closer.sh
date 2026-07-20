@@ -7,7 +7,7 @@ set -euo pipefail
 CLOSE_AFTER_DAYS="${CLOSE_AFTER_DAYS:-7}"
 DRY_RUN="${DRY_RUN:-false}"
 IGNORED_AUTHOR="${IGNORED_AUTHOR:-}"
-DEFAULT_IGNORED_AUTHORS="$(printf 'jdx\ndependabot[bot]\nrenovate[bot]')"
+DEFAULT_IGNORED_AUTHORS="$(printf 'jdx\nmise-en-dev\ndependabot[bot]\nrenovate[bot]')"
 IGNORED_AUTHORS="${IGNORED_AUTHORS:-$DEFAULT_IGNORED_AUTHORS}"
 IGNORED_LABEL="${IGNORED_LABEL:-}"
 IGNORED_LABELS="${IGNORED_LABELS:-keep-open}"
