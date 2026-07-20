@@ -15,6 +15,7 @@ inputs:
     description: Comma-separated or newline-separated pull request authors to ignore.
     default: |-
       jdx
+      mise-en-dev
       dependabot[bot]
       renovate[bot]
   ignored-label:
