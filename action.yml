@@ -1,14 +1,11 @@
 name: PR Closer
-description: Warn and close broken pull requests, and close old pull requests.
+description: Draft pull requests with unresolved automated feedback and close inactive pull requests.
 author: jdx
 
 inputs:
   close-after-days:
-    description: Number of calendar days after the first warning before a pull request with failing checks or merge conflicts is closed.
+    description: Number of calendar days without contributor activity before a pull request is closed.
     default: "7"
-  max-age-days:
-    description: Number of full days an otherwise healthy pull request with settled checks can remain open before it is closed.
-    default: "30"
   ignored-author:
     description: Additional pull request author to ignore. Prefer ignored-authors for multiple authors.
   ignored-authors:
@@ -35,7 +32,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Warn and close pull requests
+    - name: Draft and close pull requests
       shell: bash
       env:
         CLOSE_AFTER_DAYS: ${{ inputs.close-after-days }}
@@ -46,5 +43,4 @@ runs:
         IGNORED_LABEL: ${{ inputs.ignored-label }}
         IGNORED_LABELS: ${{ inputs.ignored-labels }}
         LIMIT: ${{ inputs.limit }}
-        MAX_AGE_DAYS: ${{ inputs.max-age-days }}
       run: ${{ github.action_path }}/src/pr-closer.sh

@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$tmp/bin"
+
+cat > "$tmp/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "$*" >> "$GH_LOG"
+scenario="${SCENARIO:?}"
+if [[ "$1 $2" == "pr list" ]]; then
+  case "$scenario" in
+    feedback|human|pagination|repeat) echo '[{"number":1,"author":{"login":"alice"},"createdAt":"2026-10-03T00:00:00Z","isDraft":false}]' ;;
+    inactive|bot-activity|lookup-failure) echo '[{"number":2,"author":{"login":"alice"},"createdAt":"2026-09-01T00:00:00Z","isDraft":false}]' ;;
+    maintainer) echo '[{"number":3,"author":{"login":"maintainer"},"createdAt":"2026-09-01T00:00:00Z","isDraft":false}]' ;;
+  esac
+  exit 0
+fi
+if [[ "$1 $2" == "pr ready" || "$1 $2" == "pr comment" || "$1 $2" == "pr close" ]]; then
+  exit 0
+fi
+if [[ "$1 $2" == "api graphql" ]]; then
+  if [[ "$scenario" == pagination && "$*" != *'cursor=cursor-2'* ]]; then
+    echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":true,"endCursor":"cursor-2"},"nodes":[]}}}}}'
+  elif [[ "$scenario" == feedback || "$scenario" == pagination || "$scenario" == repeat ]]; then
+    echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"__typename":"Bot","login":"review-bot"},"pullRequestReview":{"state":"COMMENTED"}}]}}]}}}}}'
+  elif [[ "$scenario" == human ]]; then
+    echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"__typename":"User","login":"reviewer"},"pullRequestReview":{"state":"COMMENTED"}}]}}]}}}}}'
+  else
+    echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}'
+  fi
+  exit 0
+fi
+path="$2"
+if [[ "$path" == *'/permission' ]]; then
+  [[ "$scenario" == lookup-failure ]] && exit 1
+  [[ "$scenario" == maintainer ]] && { echo write; exit 0; }
+  echo read; exit 0
+fi
+if [[ "$path" == *'/comments' ]]; then
+  if [[ "$scenario" == bot-activity ]]; then echo '[[{"user":{"login":"ci[bot]","type":"Bot"},"created_at":"2026-10-03T00:00:00Z","body":"bot"}]]'; elif [[ "$scenario" == repeat ]]; then echo '[[{"user":{"login":"github-actions[bot]","type":"Bot"},"created_at":"2026-10-03T00:00:00Z","body":"<!-- pr-closer-automated-feedback-draft -->"}]]'; else echo '[[]]'; fi
+  exit 0
+fi
+if [[ "$path" == *'/commits' ]]; then
+  [[ "$scenario" == lookup-failure ]] && exit 1
+  echo '[[]]'; exit 0
+fi
+exit 1
+EOF
+chmod +x "$tmp/bin/gh"
+
+run_case() {
+  local scenario="$1"; GH_LOG="$tmp/$scenario.log" SCENARIO="$scenario" PATH="$tmp/bin:$PATH" GITHUB_REPOSITORY=test/repo GH_TOKEN=x NOW=2026-10-04T00:00:00Z CLOSE_AFTER_DAYS=7 "$root/src/pr-closer.sh" > "$tmp/$scenario.out" 2>&1 || true
+}
+assert_contains() { grep -Fq "$2" "$1" || { cat "$1"; echo "expected $2" >&2; exit 1; }; }
+assert_absent() { ! grep -Fq "$2" "$1" || { cat "$1"; echo "did not expect $2" >&2; exit 1; }; }
+
+run_case feedback
+assert_contains "$tmp/feedback.log" 'pr ready 1'
+assert_contains "$tmp/feedback.log" 'pr comment 1'
+run_case repeat
+assert_contains "$tmp/repeat.log" 'pr ready 1'
+assert_absent "$tmp/repeat.log" 'pr comment 1'
+run_case pagination
+assert_contains "$tmp/pagination.log" 'pr ready 1'
+run_case human
+assert_absent "$tmp/human.log" 'pr ready'
+run_case inactive
+assert_contains "$tmp/inactive.log" 'pr close 2'
+run_case bot-activity
+assert_contains "$tmp/bot-activity.log" 'pr close 2'
+run_case maintainer
+assert_absent "$tmp/maintainer.log" 'pr close'
+assert_absent "$tmp/maintainer.log" 'pr ready'
+run_case lookup-failure
+assert_absent "$tmp/lookup-failure.log" 'pr close'
+
+echo "pr-closer tests passed"
