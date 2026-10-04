@@ -66,10 +66,10 @@ has_active_automated_feedback() {
 }
 
 latest_contributor_activity() {
-  local pr="$1" author="$2" created_at="$3" head_ref="$4" comments commits events activity_times candidate epoch latest="" latest_epoch=0
+  local pr="$1" author="$2" created_at="$3" head_ref="$4" head_repository="$5" comments commits events activity_times candidate epoch latest="" latest_epoch=0
   if ! comments="$(api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query issue comments" >&2; return 2; fi
   if ! commits="$(api "repos/$GITHUB_REPOSITORY/pulls/$pr/commits" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query commits" >&2; return 2; fi
-  if ! events="$(api "repos/$GITHUB_REPOSITORY/events" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query repository push events" >&2; return 2; fi
+  if ! events="$(api "repos/$head_repository/events" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query head-repository push events" >&2; return 2; fi
   if ! activity_times="$(jq -r --arg author "$author" --arg created "$created_at" --arg ref "refs/heads/$head_ref" '[ $created, ($comments | flatten[]? | select(.user.login == $author and .user.type != "Bot") | .created_at), ($commits | flatten[]? | select(.author.type != "Bot" and .committer.type != "Bot") | (.commit.committer.date // .commit.author.date)), ($events | flatten[]? | select(.type == "PushEvent" and .payload.ref == $ref and .actor.type != "Bot") | .created_at) ] | map(select(. != null)) | .[]' --argjson comments "$comments" --argjson commits "$commits" --argjson events "$events" -n)"; then
     echo "Skipping PR #$pr: could not read contributor activity timestamps" >&2; return 2
   fi
@@ -120,12 +120,16 @@ Contributor commits and replies reset this timer. Please reopen or create a new 
 
 cutoff_epoch="$(date -u -d "$NOW -$CLOSE_AFTER_DAYS days" +%s)"
 pr_search="$(printf 'sort:updated-asc'; append_search_exclusions author "$IGNORED_AUTHORS"; append_search_exclusions author "$IGNORED_AUTHOR"; append_search_exclusions label "$IGNORED_LABELS"; append_search_exclusions label "$IGNORED_LABEL")"
-prs="$(gh pr list -R "$GITHUB_REPOSITORY" --state open --search "$pr_search" --json number,author,createdAt,headRefName,isDraft --limit "$LIMIT")" || { echo "Could not list pull requests; no changes were made" >&2; exit 1; }
-while IFS=$'\t' read -r pr author created_at head_ref is_draft; do
+prs="$(gh pr list -R "$GITHUB_REPOSITORY" --state open --search "$pr_search" --json number,author,createdAt,headRefName,headRepository,isDraft --limit "$LIMIT")" || { echo "Could not list pull requests; no changes were made" >&2; exit 1; }
+while IFS=$'\t' read -r pr author created_at head_ref head_repository is_draft; do
   [[ -n "$pr" ]] || continue
   if is_maintainer "$author"; then echo "Skipping PR #$pr: $author has repository write, maintain, or admin permission"; continue
   else status=$?; [[ $status -eq 2 ]] && { echo "Skipping PR #$pr: maintainer exemption could not be checked" >&2; continue; }; fi
-  if ! last_activity="$(latest_contributor_activity "$pr" "$author" "$created_at" "$head_ref")"; then
+  if [[ -z "$head_repository" || "$head_repository" == "null" ]]; then
+    echo "Skipping PR #$pr: head repository could not be determined" >&2
+    continue
+  fi
+  if ! last_activity="$(latest_contributor_activity "$pr" "$author" "$created_at" "$head_ref" "$head_repository")"; then
     echo "Skipping PR #$pr: contributor activity could not be determined" >&2
     continue
   fi
@@ -137,4 +141,4 @@ while IFS=$'\t' read -r pr author created_at head_ref is_draft; do
     fi
   fi
   if (( $(date -u -d "$last_activity" +%s) <= cutoff_epoch )); then close_inactive_pr "$pr" "$last_activity"; fi
-done < <(jq -r '.[] | [.number, .author.login, .createdAt, .headRefName, .isDraft] | @tsv' <<< "$prs")
+done < <(jq -r '.[] | [.number, .author.login, .createdAt, .headRefName, .headRepository.nameWithOwner, .isDraft] | @tsv' <<< "$prs")

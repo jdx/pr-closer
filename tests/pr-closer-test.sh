@@ -13,9 +13,9 @@ echo "$*" >> "$GH_LOG"
 scenario="${SCENARIO:?}"
 if [[ "$1 $2" == "pr list" ]]; then
   case "$scenario" in
-    feedback|human|pagination|repeat|draft-failure) echo '[{"number":1,"author":{"login":"alice"},"createdAt":"2026-10-03T00:00:00Z","headRefName":"feature","isDraft":false}]' ;;
-    inactive|bot-activity|bot-push|lookup-failure|feedback-lookup-failure|activity-pagination|human-commit|offset-commit|commits-failure) echo '[{"number":2,"author":{"login":"alice"},"createdAt":"2026-09-01T00:00:00Z","headRefName":"feature","isDraft":false}]' ;;
-    maintainer) echo '[{"number":3,"author":{"login":"maintainer"},"createdAt":"2026-09-01T00:00:00Z","headRefName":"feature","isDraft":false}]' ;;
+    feedback|human|pagination|repeat|draft-failure) echo '[{"number":1,"author":{"login":"alice"},"createdAt":"2026-10-03T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/alice"},"isDraft":false}]' ;;
+    inactive|bot-activity|bot-push|lookup-failure|feedback-lookup-failure|activity-pagination|human-commit|offset-commit|commits-failure) echo '[{"number":2,"author":{"login":"alice"},"createdAt":"2026-09-01T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/alice"},"isDraft":false}]' ;;
+    maintainer) echo '[{"number":3,"author":{"login":"maintainer"},"createdAt":"2026-09-01T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"test/repo"},"isDraft":false}]' ;;
   esac
   exit 0
 fi
@@ -31,7 +31,7 @@ if [[ "$1 $2" == "api graphql" ]]; then
     echo '{}'
   elif [[ "$scenario" == pagination && "$*" != *'cursor=cursor-2'* ]]; then
     echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":true,"endCursor":"cursor-2"},"nodes":[]}}}}}'
-  elif [[ "$scenario" == feedback || "$scenario" == pagination || "$scenario" == repeat ]]; then
+  elif [[ "$scenario" == feedback || "$scenario" == pagination || "$scenario" == repeat || "$scenario" == draft-failure ]]; then
     echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"isResolved":false,"isOutdated":false,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"author":{"__typename":"Bot","login":"review-bot"},"pullRequestReview":{"state":"COMMENTED"}}]}}]}}}}}'
   elif [[ "$scenario" == human ]]; then
     echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"isResolved":false,"isOutdated":false,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"author":{"__typename":"User","login":"reviewer"},"pullRequestReview":{"state":"COMMENTED"}}]}}]}}}}}'
@@ -105,6 +105,7 @@ assert_absent "$tmp/commits-failure.log" 'pr close'
 run_case feedback-lookup-failure
 assert_absent "$tmp/feedback-lookup-failure.log" 'pr close'
 run_case draft-failure
+assert_contains "$tmp/draft-failure.log" 'pr ready 1'
 assert_absent "$tmp/draft-failure.log" 'pr comment 1'
 assert_absent "$tmp/draft-failure.log" 'pr close 1'
 
