@@ -66,11 +66,23 @@ has_active_automated_feedback() {
 }
 
 latest_contributor_activity() {
-  local pr="$1" author="$2" created_at="$3" head_ref="$4" comments commits events
+  local pr="$1" author="$2" created_at="$3" head_ref="$4" comments commits events activity_times candidate epoch latest="" latest_epoch=0
   if ! comments="$(api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query issue comments" >&2; return 2; fi
   if ! commits="$(api "repos/$GITHUB_REPOSITORY/pulls/$pr/commits" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query commits" >&2; return 2; fi
   if ! events="$(api "repos/$GITHUB_REPOSITORY/events" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query repository push events" >&2; return 2; fi
-  jq -r --arg author "$author" --arg created "$created_at" --arg ref "refs/heads/$head_ref" '[ $created, ($comments | flatten[]? | select(.user.login == $author and .user.type != "Bot") | .created_at), ($commits | flatten[]? | select(.author.type != "Bot" and .committer.type != "Bot") | (.commit.committer.date // .commit.author.date)), ($events | flatten[]? | select(.type == "PushEvent" and .payload.ref == $ref and .actor.type != "Bot") | .created_at) ] | map(select(. != null)) | map({value: ., epoch: (fromdateiso8601)}) | max_by(.epoch) | .value' --argjson comments "$comments" --argjson commits "$commits" --argjson events "$events" -n
+  if ! activity_times="$(jq -r --arg author "$author" --arg created "$created_at" --arg ref "refs/heads/$head_ref" '[ $created, ($comments | flatten[]? | select(.user.login == $author and .user.type != "Bot") | .created_at), ($commits | flatten[]? | select(.author.type != "Bot" and .committer.type != "Bot") | (.commit.committer.date // .commit.author.date)), ($events | flatten[]? | select(.type == "PushEvent" and .payload.ref == $ref and .actor.type != "Bot") | .created_at) ] | map(select(. != null)) | .[]' --argjson comments "$comments" --argjson commits "$commits" --argjson events "$events" -n)"; then
+    echo "Skipping PR #$pr: could not read contributor activity timestamps" >&2; return 2
+  fi
+  while IFS= read -r candidate; do
+    if ! epoch="$(date -u -d "$candidate" +%s)"; then
+      echo "Skipping PR #$pr: could not parse contributor activity timestamp" >&2; return 2
+    fi
+    if [[ -z "$latest" || "$epoch" -gt "$latest_epoch" ]]; then
+      latest="$candidate"
+      latest_epoch="$epoch"
+    fi
+  done <<< "$activity_times"
+  printf '%s\n' "$latest"
 }
 
 maybe_draft_for_feedback() {

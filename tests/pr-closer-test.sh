@@ -14,7 +14,7 @@ scenario="${SCENARIO:?}"
 if [[ "$1 $2" == "pr list" ]]; then
   case "$scenario" in
     feedback|human|pagination|repeat|draft-failure) echo '[{"number":1,"author":{"login":"alice"},"createdAt":"2026-10-03T00:00:00Z","headRefName":"feature","isDraft":false}]' ;;
-    inactive|bot-activity|bot-push|lookup-failure|feedback-lookup-failure|activity-pagination|human-commit|commits-failure) echo '[{"number":2,"author":{"login":"alice"},"createdAt":"2026-09-01T00:00:00Z","headRefName":"feature","isDraft":false}]' ;;
+    inactive|bot-activity|bot-push|lookup-failure|feedback-lookup-failure|activity-pagination|human-commit|offset-commit|commits-failure) echo '[{"number":2,"author":{"login":"alice"},"createdAt":"2026-09-01T00:00:00Z","headRefName":"feature","isDraft":false}]' ;;
     maintainer) echo '[{"number":3,"author":{"login":"maintainer"},"createdAt":"2026-09-01T00:00:00Z","headRefName":"feature","isDraft":false}]' ;;
   esac
   exit 0
@@ -56,7 +56,7 @@ if [[ "$path" == *'/comments' ]]; then
 fi
 if [[ "$path" == *'/commits' ]]; then
   [[ "$scenario" == commits-failure ]] && exit 1
-  if [[ "$scenario" == bot-push ]]; then echo '[[{"author":{"login":"ci[bot]","type":"Bot"},"committer":{"login":"alice","type":"User"},"commit":{"committer":{"date":"2026-10-03T00:00:00Z"}}}]]'; elif [[ "$scenario" == human-commit ]]; then echo '[[{"author":{"login":"alice","type":"User"},"committer":{"login":"alice","type":"User"},"commit":{"committer":{"date":"2026-10-03T00:00:00Z"}}}]]'; else echo '[[]]'; fi
+  if [[ "$scenario" == bot-push ]]; then echo '[[{"author":{"login":"ci[bot]","type":"Bot"},"committer":{"login":"alice","type":"User"},"commit":{"committer":{"date":"2026-10-03T00:00:00Z"}}}]]'; elif [[ "$scenario" == human-commit ]]; then echo '[[{"author":{"login":"alice","type":"User"},"committer":{"login":"alice","type":"User"},"commit":{"committer":{"date":"2026-10-03T00:00:00Z"}}}]]'; elif [[ "$scenario" == offset-commit ]]; then echo '[[{"author":{"login":"alice","type":"User"},"committer":{"login":"alice","type":"User"},"commit":{"committer":{"date":"2026-10-03T18:00:00-07:00"}}}]]'; else echo '[[]]'; fi
   exit 0
 fi
 exit 1
@@ -91,6 +91,8 @@ run_case bot-push
 assert_contains "$tmp/bot-push.log" 'pr close 2'
 run_case human-commit
 assert_absent "$tmp/human-commit.log" 'pr close 2'
+run_case offset-commit
+assert_absent "$tmp/offset-commit.log" 'pr close 2'
 run_case activity-pagination
 assert_absent "$tmp/activity-pagination.log" 'pr close 2'
 run_case maintainer
