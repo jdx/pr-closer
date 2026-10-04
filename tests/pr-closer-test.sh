@@ -23,6 +23,7 @@ if [[ "$1 $2" == "pr list" ]]; then
   exit 0
 fi
 if [[ "$1 $2" == "pr ready" ]]; then
+  [[ " $* " == *" --undo "* ]] || exit 1
   [[ "$scenario" == draft-failure ]] && exit 1
   exit 0
 fi
@@ -115,7 +116,7 @@ run_case feedback-lookup-failure
 assert_absent "$tmp/feedback-lookup-failure.log" 'pr close'
 run_case draft-failure
 assert_contains "$tmp/draft-failure.log" 'pr ready 1'
-assert_absent "$tmp/draft-failure.log" 'pr comment 1'
+assert_contains "$tmp/draft-failure.log" 'pr comment 1'
 assert_absent "$tmp/draft-failure.log" 'pr close 1'
 
 echo "pr-closer tests passed"
