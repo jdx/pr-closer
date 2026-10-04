@@ -87,7 +87,7 @@ latest_contributor_activity() {
     if ! updated_epoch="$(date -u -d "$updated_at" +%s)"; then
       echo "Skipping PR #$pr: could not parse pull request update timestamp" >&2; return 2
     fi
-    if (( updated_epoch > latest_epoch )); then
+    if (( updated_epoch > latest_epoch && updated_epoch > cutoff_epoch )); then
       echo "Deferring inactive close for PR #$pr: a newer update cannot be attributed safely" >&2
       return 3
     fi
