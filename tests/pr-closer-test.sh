@@ -13,9 +13,10 @@ echo "$*" >> "$GH_LOG"
 scenario="${SCENARIO:?}"
 if [[ "$1 $2" == "pr list" ]]; then
   case "$scenario" in
-    feedback|human|pagination|repeat|draft-failure) echo '[{"number":1,"author":{"login":"alice"},"createdAt":"2026-10-03T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/alice"},"isDraft":false}]' ;;
-    inactive|bot-activity|bot-push|lookup-failure|feedback-lookup-failure|activity-pagination|human-commit|offset-commit|commits-failure) echo '[{"number":2,"author":{"login":"alice"},"createdAt":"2026-09-01T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/alice"},"isDraft":false}]' ;;
-    maintainer) echo '[{"number":3,"author":{"login":"maintainer"},"createdAt":"2026-09-01T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"test/repo"},"isDraft":false}]' ;;
+    feedback|human|pagination|repeat|draft-failure) echo '[{"number":1,"author":{"login":"alice"},"createdAt":"2026-10-03T00:00:00Z","updatedAt":"2026-10-03T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/alice"},"isDraft":false}]' ;;
+    inactive|bot-activity|bot-push|lookup-failure|feedback-lookup-failure|activity-pagination|human-commit|offset-commit|commits-failure) echo '[{"number":2,"author":{"login":"alice"},"createdAt":"2026-09-01T00:00:00Z","updatedAt":"2026-09-01T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/alice"},"isDraft":false}]' ;;
+    ambiguous-update) echo '[{"number":2,"author":{"login":"alice"},"createdAt":"2026-09-01T00:00:00Z","updatedAt":"2026-10-03T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/alice"},"isDraft":false}]' ;;
+    maintainer) echo '[{"number":3,"author":{"login":"maintainer"},"createdAt":"2026-09-01T00:00:00Z","updatedAt":"2026-09-01T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"test/repo"},"isDraft":false}]' ;;
   esac
   exit 0
 fi
@@ -95,6 +96,8 @@ run_case offset-commit
 assert_absent "$tmp/offset-commit.log" 'pr close 2'
 run_case activity-pagination
 assert_absent "$tmp/activity-pagination.log" 'pr close 2'
+run_case ambiguous-update
+assert_absent "$tmp/ambiguous-update.log" 'pr close 2'
 run_case maintainer
 assert_absent "$tmp/maintainer.log" 'pr close'
 assert_absent "$tmp/maintainer.log" 'pr ready'
