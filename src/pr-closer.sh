@@ -47,14 +47,17 @@ is_maintainer() {
 has_active_automated_feedback() {
   local pr="$1" cursor="null" response
   while :; do
-    if ! response="$(api graphql -f query='query($owner:String!, $name:String!, $number:Int!, $cursor:String) { repository(owner:$owner,name:$name) { pullRequest(number:$number) { reviewThreads(first:100, after:$cursor) { pageInfo { hasNextPage endCursor } nodes { isResolved isOutdated comments(first:100) { nodes { author { __typename login } pullRequestReview { state } } } } } } } }' -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" -F number="$pr" -F cursor="$cursor")"; then
+    if ! response="$(api graphql -f query='query($owner:String!, $name:String!, $number:Int!, $cursor:String) { repository(owner:$owner,name:$name) { pullRequest(number:$number) { reviewThreads(first:100, after:$cursor) { pageInfo { hasNextPage endCursor } nodes { isResolved isOutdated comments(first:100) { pageInfo { hasNextPage } nodes { author { __typename login } pullRequestReview { state } } } } } } } }' -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" -F number="$pr" -F cursor="$cursor")"; then
       echo "Skipping PR #$pr: could not query review threads" >&2; return 2
     fi
     if jq -e '.data.repository.pullRequest == null' >/dev/null <<< "$response"; then
       echo "Skipping PR #$pr: review thread lookup returned no pull request" >&2; return 2
     fi
-    if ! jq -e '(.data.repository.pullRequest? // empty) as $pr | ($pr.reviewThreads? | type == "object") and ($pr.reviewThreads.nodes | type == "array") and ($pr.reviewThreads.pageInfo.hasNextPage | type == "boolean")' >/dev/null <<< "$response"; then
+    if ! jq -e '(.data.repository.pullRequest? // empty) as $pr | ($pr.reviewThreads? | type == "object") and ($pr.reviewThreads.nodes | type == "array") and ($pr.reviewThreads.pageInfo.hasNextPage | type == "boolean") and all($pr.reviewThreads.nodes[]; (.comments.nodes | type == "array") and (.comments.pageInfo.hasNextPage | type == "boolean"))' >/dev/null <<< "$response"; then
       echo "Skipping PR #$pr: review thread lookup returned an incomplete response" >&2; return 2
+    fi
+    if jq -e '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.comments.pageInfo.hasNextPage)] | length > 0' >/dev/null <<< "$response"; then
+      echo "Skipping PR #$pr: a review thread has more than 100 comments" >&2; return 2
     fi
     if jq -e '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not) | select(.isOutdated | not) | .comments.nodes[] | select(.author.__typename == "Bot") | select((.pullRequestReview.state // "") != "DISMISSED")] | length > 0' >/dev/null <<< "$response"; then return 0; fi
     [[ "$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage' <<< "$response")" == true ]] || return 1
@@ -63,10 +66,11 @@ has_active_automated_feedback() {
 }
 
 latest_contributor_activity() {
-  local pr="$1" author="$2" created_at="$3" comments commits
+  local pr="$1" author="$2" created_at="$3" head_ref="$4" comments commits events
   if ! comments="$(api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query issue comments" >&2; return 2; fi
   if ! commits="$(api "repos/$GITHUB_REPOSITORY/pulls/$pr/commits" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query commits" >&2; return 2; fi
-  jq -r --arg author "$author" --arg created "$created_at" '[ $created, ($comments | flatten[]? | select(.user.login == $author and .user.type != "Bot") | .created_at), ($commits | flatten[]? | select(.author.type != "Bot" and .committer.type != "Bot") | (.commit.committer.date // .commit.author.date)) ] | map(select(. != null)) | max' --argjson comments "$comments" --argjson commits "$commits" -n
+  if ! events="$(api "repos/$GITHUB_REPOSITORY/events" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query repository push events" >&2; return 2; fi
+  jq -r --arg author "$author" --arg created "$created_at" --arg ref "refs/heads/$head_ref" '[ $created, ($comments | flatten[]? | select(.user.login == $author and .user.type != "Bot") | .created_at), ($commits | flatten[]? | select(.author.type != "Bot" and .committer.type != "Bot") | (.commit.committer.date // .commit.author.date)), ($events | flatten[]? | select(.type == "PushEvent" and .payload.ref == $ref and .actor.type != "Bot") | .created_at) ] | map(select(. != null)) | map({value: ., epoch: (fromdateiso8601)}) | max_by(.epoch) | .value' --argjson comments "$comments" --argjson commits "$commits" --argjson events "$events" -n
 }
 
 maybe_draft_for_feedback() {
@@ -75,7 +79,11 @@ maybe_draft_for_feedback() {
   if has_active_automated_feedback "$pr"; then status=0; else status=$?; fi
   [[ $status -eq 0 ]] || { [[ $status -eq 1 ]] && return 0; return 2; }
   if ! comments="$(api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate --slurp)"; then echo "Skipping draft action for PR #$pr: could not inspect explanatory comments" >&2; return 2; fi
-  echo "Converting PR #$pr to draft due to unresolved automated review feedback"; draft_pr "$pr"
+  if ! draft_pr "$pr"; then
+    echo "Skipping PR #$pr: could not convert it to draft" >&2
+    return 2
+  fi
+  echo "Converted PR #$pr to draft due to unresolved automated review feedback"
   if jq -e --arg marker "$DRAFT_MARKER" '[flatten[]? | select(.body | contains($marker))] | length > 0' >/dev/null <<< "$comments"; then echo "PR #$pr already has an automated-feedback explanation"; else
     comment_pr "$pr" "$(cat <<EOF
 This PR was converted to draft because it has unresolved automated review feedback. Please resolve the feedback and mark it ready for review when you are ready to continue.
@@ -100,11 +108,15 @@ Contributor commits and replies reset this timer. Please reopen or create a new 
 
 cutoff_epoch="$(date -u -d "$NOW -$CLOSE_AFTER_DAYS days" +%s)"
 pr_search="$(printf 'sort:updated-asc'; append_search_exclusions author "$IGNORED_AUTHORS"; append_search_exclusions author "$IGNORED_AUTHOR"; append_search_exclusions label "$IGNORED_LABELS"; append_search_exclusions label "$IGNORED_LABEL")"
-prs="$(gh pr list -R "$GITHUB_REPOSITORY" --state open --search "$pr_search" --json number,author,createdAt,isDraft --limit "$LIMIT")" || { echo "Could not list pull requests; no changes were made" >&2; exit 1; }
-while IFS=$'\t' read -r pr author created_at is_draft; do
+prs="$(gh pr list -R "$GITHUB_REPOSITORY" --state open --search "$pr_search" --json number,author,createdAt,headRefName,isDraft --limit "$LIMIT")" || { echo "Could not list pull requests; no changes were made" >&2; exit 1; }
+while IFS=$'\t' read -r pr author created_at head_ref is_draft; do
   [[ -n "$pr" ]] || continue
   if is_maintainer "$author"; then echo "Skipping PR #$pr: $author has repository write, maintain, or admin permission"; continue
   else status=$?; [[ $status -eq 2 ]] && { echo "Skipping PR #$pr: maintainer exemption could not be checked" >&2; continue; }; fi
+  if ! last_activity="$(latest_contributor_activity "$pr" "$author" "$created_at" "$head_ref")"; then
+    echo "Skipping PR #$pr: contributor activity could not be determined" >&2
+    continue
+  fi
   if maybe_draft_for_feedback "$pr" "$is_draft"; then :; else
     status=$?
     if [[ $status -eq 2 ]]; then
@@ -112,6 +124,5 @@ while IFS=$'\t' read -r pr author created_at is_draft; do
       continue
     fi
   fi
-  if ! last_activity="$(latest_contributor_activity "$pr" "$author" "$created_at")"; then echo "Skipping inactive-close action for PR #$pr: contributor activity could not be determined" >&2; continue; fi
   if (( $(date -u -d "$last_activity" +%s) <= cutoff_epoch )); then close_inactive_pr "$pr" "$last_activity"; fi
-done < <(jq -r '.[] | [.number, .author.login, .createdAt, .isDraft] | @tsv' <<< "$prs")
+done < <(jq -r '.[] | [.number, .author.login, .createdAt, .headRefName, .isDraft] | @tsv' <<< "$prs")
