@@ -66,11 +66,10 @@ has_active_automated_feedback() {
 }
 
 latest_contributor_activity() {
-  local pr="$1" author="$2" created_at="$3" updated_at="$4" head_ref="$5" head_repository="$6" comments commits events activity_times candidate epoch latest="" latest_epoch=0 has_push_event updated_epoch
+  local pr="$1" author="$2" created_at="$3" updated_at="$4" head_ref="$5" head_repository="$6" comments commits events activity_times candidate epoch latest="" latest_epoch=0 updated_epoch
   if ! comments="$(api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query issue comments" >&2; return 2; fi
   if ! commits="$(api "repos/$GITHUB_REPOSITORY/pulls/$pr/commits" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query commits" >&2; return 2; fi
   if ! events="$(api "repos/$head_repository/events" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query head-repository push events" >&2; return 2; fi
-  has_push_event="$(jq -r --arg ref "refs/heads/$head_ref" 'any(flatten[]?; .type == "PushEvent" and .payload.ref == $ref and .actor.type != "Bot")' <<< "$events")" || return 2
   if ! activity_times="$(jq -r --arg author "$author" --arg created "$created_at" --arg ref "refs/heads/$head_ref" '[ $created, ($comments | flatten[]? | select(.user.login == $author and .user.type != "Bot") | .created_at), ($commits | flatten[]? | select(.author.type != "Bot" and .committer.type != "Bot") | (.commit.committer.date // .commit.author.date)), ($events | flatten[]? | select(.type == "PushEvent" and .payload.ref == $ref and .actor.type != "Bot") | .created_at) ] | map(select(. != null)) | .[]' --argjson comments "$comments" --argjson commits "$commits" --argjson events "$events" -n)"; then
     echo "Skipping PR #$pr: could not read contributor activity timestamps" >&2; return 2
   fi
@@ -83,14 +82,12 @@ latest_contributor_activity() {
       latest_epoch="$epoch"
     fi
   done <<< "$activity_times"
-  if [[ "$has_push_event" != true ]]; then
-    if ! updated_epoch="$(date -u -d "$updated_at" +%s)"; then
-      echo "Skipping PR #$pr: could not parse pull request update timestamp" >&2; return 2
-    fi
-    if (( updated_epoch > latest_epoch && updated_epoch > cutoff_epoch )); then
-      echo "Deferring inactive close for PR #$pr: a newer update cannot be attributed safely" >&2
-      return 3
-    fi
+  if ! updated_epoch="$(date -u -d "$updated_at" +%s)"; then
+    echo "Skipping PR #$pr: could not parse pull request update timestamp" >&2; return 2
+  fi
+  if (( updated_epoch > latest_epoch && updated_epoch > cutoff_epoch )); then
+    echo "Deferring inactive close for PR #$pr: a newer update cannot be attributed safely" >&2
+    return 3
   fi
   printf '%s\n' "$latest"
 }
