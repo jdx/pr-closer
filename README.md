@@ -61,9 +61,9 @@ Every run inspects open pull requests, skipping the configured authors and label
 
 For a ready PR, the action immediately converts it to draft when GitHub reports an unresolved, non-outdated review thread that contains feedback from a GitHub `Bot` account whose review is not dismissed. It leaves one explanatory comment, marked to avoid repeats. It never marks a PR ready again; the contributor does that.
 
-The automated-feedback check paginates review threads and intentionally does not treat human reviewers, failed checks, merge conflicts, pending checks, outdated threads, resolved threads, or dismissed reviews as triggers. GitHub's review-thread API is the coverage boundary: feedback surfaced only outside review threads is not detected.
+The automated-feedback check paginates review threads and intentionally does not treat human reviewers, failed checks, merge conflicts, pending checks, outdated threads, resolved threads, or dismissed reviews as triggers. GitHub's review-thread API is the coverage boundary: feedback surfaced only outside review threads is not detected. In particular, this action does not query or integrate with an external `Entire` findings service; an Entire finding is considered only if that service has created a qualifying GitHub Bot-authored review-thread comment.
 
-Separately, the action closes both draft and ready PRs after `close-after-days` days without contributor activity. The clock starts at creation and resets on a non-bot commit in the PR or a non-bot issue comment written by the PR author. Comments from bots/actions and action comments do not reset it. It does not use PR `updatedAt`, so maintainer comments, review events, and other incidental updates do not keep a PR open.
+Separately, the action closes both draft and ready PRs after `close-after-days` days without contributor activity. The clock starts at creation and resets on a non-bot commit in the PR or a non-bot issue comment written by the PR author. A commit is excluded when either GitHub-linked commit identity is a Bot, so bot-generated branch pushes do not reset the timer. Comments from bots/actions and action comments do not reset it. It does not use PR `updatedAt`, so maintainer comments, review events, and other incidental updates do not keep a PR open.
 
 ## Requirements
 

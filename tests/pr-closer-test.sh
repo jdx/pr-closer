@@ -14,7 +14,7 @@ scenario="${SCENARIO:?}"
 if [[ "$1 $2" == "pr list" ]]; then
   case "$scenario" in
     feedback|human|pagination|repeat) echo '[{"number":1,"author":{"login":"alice"},"createdAt":"2026-10-03T00:00:00Z","isDraft":false}]' ;;
-    inactive|bot-activity|lookup-failure) echo '[{"number":2,"author":{"login":"alice"},"createdAt":"2026-09-01T00:00:00Z","isDraft":false}]' ;;
+    inactive|bot-activity|bot-push|lookup-failure|feedback-lookup-failure|activity-pagination) echo '[{"number":2,"author":{"login":"alice"},"createdAt":"2026-09-01T00:00:00Z","isDraft":false}]' ;;
     maintainer) echo '[{"number":3,"author":{"login":"maintainer"},"createdAt":"2026-09-01T00:00:00Z","isDraft":false}]' ;;
   esac
   exit 0
@@ -23,7 +23,9 @@ if [[ "$1 $2" == "pr ready" || "$1 $2" == "pr comment" || "$1 $2" == "pr close" 
   exit 0
 fi
 if [[ "$1 $2" == "api graphql" ]]; then
-  if [[ "$scenario" == pagination && "$*" != *'cursor=cursor-2'* ]]; then
+  if [[ "$scenario" == feedback-lookup-failure ]]; then
+    echo '{}'
+  elif [[ "$scenario" == pagination && "$*" != *'cursor=cursor-2'* ]]; then
     echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":true,"endCursor":"cursor-2"},"nodes":[]}}}}}'
   elif [[ "$scenario" == feedback || "$scenario" == pagination || "$scenario" == repeat ]]; then
     echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"__typename":"Bot","login":"review-bot"},"pullRequestReview":{"state":"COMMENTED"}}]}}]}}}}}'
@@ -41,12 +43,13 @@ if [[ "$path" == *'/permission' ]]; then
   echo read; exit 0
 fi
 if [[ "$path" == *'/comments' ]]; then
-  if [[ "$scenario" == bot-activity ]]; then echo '[[{"user":{"login":"ci[bot]","type":"Bot"},"created_at":"2026-10-03T00:00:00Z","body":"bot"}]]'; elif [[ "$scenario" == repeat ]]; then echo '[[{"user":{"login":"github-actions[bot]","type":"Bot"},"created_at":"2026-10-03T00:00:00Z","body":"<!-- pr-closer-automated-feedback-draft -->"}]]'; else echo '[[]]'; fi
+  if [[ "$scenario" == bot-activity ]]; then echo '[[{"user":{"login":"ci[bot]","type":"Bot"},"created_at":"2026-10-03T00:00:00Z","body":"bot"}]]'; elif [[ "$scenario" == activity-pagination ]]; then echo '[[],[{"user":{"login":"alice","type":"User"},"created_at":"2026-10-03T00:00:00Z","body":"progress"}]]'; elif [[ "$scenario" == repeat ]]; then echo '[[{"user":{"login":"github-actions[bot]","type":"Bot"},"created_at":"2026-10-03T00:00:00Z","body":"<!-- pr-closer-automated-feedback-draft -->"}]]'; else echo '[[]]'; fi
   exit 0
 fi
 if [[ "$path" == *'/commits' ]]; then
   [[ "$scenario" == lookup-failure ]] && exit 1
-  echo '[[]]'; exit 0
+  if [[ "$scenario" == bot-push ]]; then echo '[[{"author":{"login":"ci[bot]","type":"Bot"},"committer":{"login":"alice","type":"User"},"commit":{"committer":{"date":"2026-10-03T00:00:00Z"}}}]]'; else echo '[[]]'; fi
+  exit 0
 fi
 exit 1
 EOF
@@ -72,10 +75,16 @@ run_case inactive
 assert_contains "$tmp/inactive.log" 'pr close 2'
 run_case bot-activity
 assert_contains "$tmp/bot-activity.log" 'pr close 2'
+run_case bot-push
+assert_contains "$tmp/bot-push.log" 'pr close 2'
+run_case activity-pagination
+assert_absent "$tmp/activity-pagination.log" 'pr close 2'
 run_case maintainer
 assert_absent "$tmp/maintainer.log" 'pr close'
 assert_absent "$tmp/maintainer.log" 'pr ready'
 run_case lookup-failure
 assert_absent "$tmp/lookup-failure.log" 'pr close'
+run_case feedback-lookup-failure
+assert_absent "$tmp/feedback-lookup-failure.log" 'pr close'
 
 echo "pr-closer tests passed"

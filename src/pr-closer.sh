@@ -53,6 +53,9 @@ has_active_automated_feedback() {
     if jq -e '.data.repository.pullRequest == null' >/dev/null <<< "$response"; then
       echo "Skipping PR #$pr: review thread lookup returned no pull request" >&2; return 2
     fi
+    if ! jq -e '(.data.repository.pullRequest? // empty) as $pr | ($pr.reviewThreads? | type == "object") and ($pr.reviewThreads.nodes | type == "array") and ($pr.reviewThreads.pageInfo.hasNextPage | type == "boolean")' >/dev/null <<< "$response"; then
+      echo "Skipping PR #$pr: review thread lookup returned an incomplete response" >&2; return 2
+    fi
     if jq -e '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not) | select(.isOutdated | not) | .comments.nodes[] | select(.author.__typename == "Bot") | select((.pullRequestReview.state // "") != "DISMISSED")] | length > 0' >/dev/null <<< "$response"; then return 0; fi
     [[ "$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage' <<< "$response")" == true ]] || return 1
     cursor="$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor' <<< "$response")"
@@ -63,7 +66,7 @@ latest_contributor_activity() {
   local pr="$1" author="$2" created_at="$3" comments commits
   if ! comments="$(api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query issue comments" >&2; return 2; fi
   if ! commits="$(api "repos/$GITHUB_REPOSITORY/pulls/$pr/commits" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query commits" >&2; return 2; fi
-  jq -r --arg author "$author" --arg created "$created_at" '[ $created, ($comments | flatten[]? | select(.user.login == $author and .user.type != "Bot") | .created_at), ($commits | flatten[]? | select(.author.type != "Bot") | (.commit.committer.date // .commit.author.date)) ] | map(select(. != null)) | max' --argjson comments "$comments" --argjson commits "$commits" -n
+  jq -r --arg author "$author" --arg created "$created_at" '[ $created, ($comments | flatten[]? | select(.user.login == $author and .user.type != "Bot") | .created_at), ($commits | flatten[]? | select(.author.type != "Bot" and .committer.type != "Bot") | (.commit.committer.date // .commit.author.date)) ] | map(select(. != null)) | max' --argjson comments "$comments" --argjson commits "$commits" -n
 }
 
 maybe_draft_for_feedback() {
