@@ -68,7 +68,7 @@ has_active_automated_feedback() {
 }
 
 latest_contributor_activity() {
-  local pr="$1" author="$2" created_at="$3" updated_at="$4" head_ref="$5" head_repository="$6" comments review_comments reviews commits events activity_times human_activity_times bot_activity_times candidate epoch latest="" latest_epoch=0 human_latest_epoch=0 bot_latest_epoch=0 updated_epoch
+  local pr="$1" author="$2" created_at="$3" updated_at="$4" head_ref="$5" head_repository="$6" comments review_comments reviews commits events activity_times human_activity_times ambiguous_activity_times bot_activity_times candidate epoch latest="" latest_epoch=0 human_latest_epoch=0 ambiguous_latest_epoch=0 bot_latest_epoch=0 updated_epoch
   if ! comments="$(api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query issue comments" >&2; return 2; fi
   if ! review_comments="$(api "repos/$GITHUB_REPOSITORY/pulls/$pr/comments" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query review comments" >&2; return 2; fi
   if ! reviews="$(api "repos/$GITHUB_REPOSITORY/pulls/$pr/reviews" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query reviews" >&2; return 2; fi
@@ -100,6 +100,16 @@ latest_contributor_activity() {
     fi
     (( epoch > human_latest_epoch )) && human_latest_epoch="$epoch"
   done <<< "$human_activity_times"
+  if ! ambiguous_activity_times="$(jq -r -n --slurpfile comments <(printf '%s' "$comments") --slurpfile review_comments <(printf '%s' "$review_comments") '[ ($comments[0] | flatten[]? | select(.user.type == "Bot" and .updated_at != null and .updated_at != .created_at) | .updated_at), ($review_comments[0] | flatten[]? | select(.user.type == "Bot" and .updated_at != null and .updated_at != .created_at) | .updated_at) ] | map(select(. != null)) | .[]')"; then
+    echo "Skipping PR #$pr: could not read ambiguous activity timestamps" >&2; return 2
+  fi
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    if ! epoch="$(date -u -d "$candidate" +%s)"; then
+      echo "Skipping PR #$pr: could not parse ambiguous activity timestamp" >&2; return 2
+    fi
+    (( epoch > ambiguous_latest_epoch )) && ambiguous_latest_epoch="$epoch"
+  done <<< "$ambiguous_activity_times"
   # GitHub's updatedAt includes action and bot activity. A REST issue comment
   # identifies its original author, not its editor, so only an unedited bot
   # comment is safe attribution. Any edited bot comment remains ambiguous.
@@ -118,6 +128,10 @@ latest_contributor_activity() {
   fi
   if (( human_latest_epoch > latest_epoch && human_latest_epoch > cutoff_epoch )); then
     echo "Deferring inactive close for PR #$pr: a newer human update is not contributor activity" >&2
+    return 3
+  fi
+  if (( ambiguous_latest_epoch > cutoff_epoch )); then
+    echo "Deferring inactive close for PR #$pr: a recent bot-comment edit cannot be attributed safely" >&2
     return 3
   fi
   # Only an update at the exact timestamp of known bot activity is safe to
