@@ -16,6 +16,12 @@ on:
     - cron: "0 0 * * *"
   workflow_dispatch:
 
+# Prevent a manual run and the schedule from evaluating/commenting on the
+# same pull request at the same time.
+concurrency:
+  group: pr-closer-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   pr-closer:
     runs-on: ubuntu-latest
