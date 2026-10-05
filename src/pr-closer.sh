@@ -13,7 +13,8 @@ IGNORED_LABEL="${IGNORED_LABEL:-}"
 IGNORED_LABELS="${IGNORED_LABELS:-keep-open}"
 LIMIT="${LIMIT:-500}"
 NOW="${NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
-DRAFT_MARKER="<!-- pr-closer-automated-feedback-draft -->"
+# Kept stable so warnings posted by older action versions remain idempotent.
+AI_FEEDBACK_WARNING_MARKER="<!-- pr-closer-automated-feedback-draft -->"
 
 if ! [[ "$CLOSE_AFTER_DAYS" =~ ^[0-9]+$ ]] || (( CLOSE_AFTER_DAYS < 1 )); then
   echo "close-after-days must be a positive integer" >&2; exit 1
@@ -66,7 +67,7 @@ has_active_automated_feedback() {
 }
 
 latest_contributor_activity() {
-  local pr="$1" author="$2" created_at="$3" updated_at="$4" head_ref="$5" head_repository="$6" comments commits events activity_times candidate epoch latest="" latest_epoch=0 updated_epoch
+  local pr="$1" author="$2" created_at="$3" updated_at="$4" head_ref="$5" head_repository="$6" comments commits events activity_times bot_activity_times candidate epoch latest="" latest_epoch=0 bot_latest_epoch=0 updated_epoch
   if ! comments="$(api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query issue comments" >&2; return 2; fi
   if ! commits="$(api "repos/$GITHUB_REPOSITORY/pulls/$pr/commits" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query commits" >&2; return 2; fi
   if ! events="$(api "repos/$head_repository/events" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query head-repository push events" >&2; return 2; fi
@@ -74,6 +75,7 @@ latest_contributor_activity() {
     echo "Skipping PR #$pr: could not read contributor activity timestamps" >&2; return 2
   fi
   while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
     if ! epoch="$(date -u -d "$candidate" +%s)"; then
       echo "Skipping PR #$pr: could not parse contributor activity timestamp" >&2; return 2
     fi
@@ -82,10 +84,23 @@ latest_contributor_activity() {
       latest_epoch="$epoch"
     fi
   done <<< "$activity_times"
+  # GitHub's updatedAt includes action and bot activity.  Do not let an update
+  # we can positively identify as bot activity restart the contributor clock;
+  # retain the conservative deferral for every update that remains ambiguous.
+  if ! bot_activity_times="$(jq -r -n --arg ref "refs/heads/$head_ref" --slurpfile comments <(printf '%s' "$comments") --slurpfile commits <(printf '%s' "$commits") --slurpfile events <(printf '%s' "$events") '[ ($comments[0] | flatten[]? | select(.user.type == "Bot") | (.updated_at // .created_at)), ($commits[0] | flatten[]? | select(.author.type == "Bot" or .committer.type == "Bot") | (.commit.committer.date // .commit.author.date)), ($events[0] | flatten[]? | select(.type == "PushEvent" and .payload.ref == $ref and .actor.type == "Bot") | .created_at) ] | map(select(. != null)) | .[]')"; then
+    echo "Skipping PR #$pr: could not read bot activity timestamps" >&2; return 2
+  fi
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    if ! epoch="$(date -u -d "$candidate" +%s)"; then
+      echo "Skipping PR #$pr: could not parse bot activity timestamp" >&2; return 2
+    fi
+    (( epoch > bot_latest_epoch )) && bot_latest_epoch="$epoch"
+  done <<< "$bot_activity_times"
   if ! updated_epoch="$(date -u -d "$updated_at" +%s)"; then
     echo "Skipping PR #$pr: could not parse pull request update timestamp" >&2; return 2
   fi
-  if (( updated_epoch > latest_epoch && updated_epoch > cutoff_epoch )); then
+  if (( updated_epoch > latest_epoch && updated_epoch > cutoff_epoch && updated_epoch > bot_latest_epoch )); then
     echo "Deferring inactive close for PR #$pr: a newer update cannot be attributed safely" >&2
     return 3
   fi
@@ -93,24 +108,22 @@ latest_contributor_activity() {
 }
 
 maybe_draft_for_feedback() {
-  local pr="$1" is_draft="$2" comments status
-  [[ "$is_draft" == true ]] && return
+  local pr="$1" is_draft="$2" comments status warning_body
   if has_active_automated_feedback "$pr"; then status=0; else status=$?; fi
   [[ $status -eq 0 ]] || { [[ $status -eq 1 ]] && return 0; return 2; }
   if ! comments="$(api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate --slurp)"; then echo "Skipping draft action for PR #$pr: could not inspect explanatory comments" >&2; return 2; fi
-  if jq -e --arg marker "$DRAFT_MARKER" '[flatten[]? | select(.body | contains($marker))] | length > 0' >/dev/null <<< "$comments"; then echo "PR #$pr already has an automated-feedback explanation"; else
-    if ! comment_pr "$pr" "$(cat <<EOF
-This PR has unresolved automated review feedback and is being converted to draft. Please resolve the feedback and mark it ready for review when you are ready to continue.
+  if jq -e --arg marker "$AI_FEEDBACK_WARNING_MARKER" '[flatten[]? | select((.body // "") | contains($marker))] | length > 0' >/dev/null <<< "$comments"; then echo "PR #$pr already has an AI-feedback warning"; else
+    warning_body="This PR has unresolved AI review feedback. Please address or resolve the review threads, then mark the PR ready for review when you are ready to continue. See the repository's contributing guidance for the expected review process.
 
 *This comment was generated by an automated workflow.*
 
-$DRAFT_MARKER
-EOF
-)"; then
+$AI_FEEDBACK_WARNING_MARKER"
+    if ! comment_pr "$pr" "$warning_body"; then
       echo "Skipping PR #$pr: could not post the automated-feedback explanation" >&2
       return 2
     fi
   fi
+  [[ "$is_draft" == true ]] && return
   if ! draft_pr "$pr"; then
     echo "Skipping PR #$pr: could not convert it to draft" >&2
     return 2
