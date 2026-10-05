@@ -65,6 +65,8 @@ jobs:
 
 Every run inspects open pull requests, skipping the configured authors and labels. Authors with verified `write`, `maintain`, or `admin` repository permission are also exempt from every action. If the action cannot verify permissions, activity, feedback, or comments for a pull request, it skips that pull request rather than acting on incomplete information.
 
+In particular, if automated-feedback lookup fails, the action also skips the inactive-close step for that PR. This fail-closed behavior avoids closing a PR while review state is unknown.
+
 For a ready PR, the action immediately converts it to draft when GitHub reports an unresolved, non-outdated review thread that contains feedback from a GitHub `Bot` account whose review is not dismissed. It leaves one explanatory comment, marked to avoid repeats. It never marks a PR ready again; the contributor does that.
 
 The automated-feedback check paginates review threads and intentionally does not treat human reviewers, failed checks, merge conflicts, pending checks, outdated threads, resolved threads, or dismissed reviews as triggers. GitHub's review-thread API is the coverage boundary: feedback surfaced only outside review threads is not detected. For safety, a thread with more than 100 comments causes that PR to be skipped rather than incompletely inspected. In particular, this action does not query or integrate with an external `Entire` findings service; an Entire finding is considered only if that service has created a qualifying GitHub Bot-authored review-thread comment.

@@ -68,9 +68,10 @@ has_active_automated_feedback() {
 }
 
 latest_contributor_activity() {
-  local pr="$1" author="$2" created_at="$3" updated_at="$4" head_ref="$5" head_repository="$6" comments review_comments commits events activity_times human_activity_times bot_activity_times candidate epoch latest="" latest_epoch=0 human_latest_epoch=0 bot_latest_epoch=0 updated_epoch
+  local pr="$1" author="$2" created_at="$3" updated_at="$4" head_ref="$5" head_repository="$6" comments review_comments reviews commits events activity_times human_activity_times bot_activity_times candidate epoch latest="" latest_epoch=0 human_latest_epoch=0 bot_latest_epoch=0 updated_epoch
   if ! comments="$(api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query issue comments" >&2; return 2; fi
   if ! review_comments="$(api "repos/$GITHUB_REPOSITORY/pulls/$pr/comments" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query review comments" >&2; return 2; fi
+  if ! reviews="$(api "repos/$GITHUB_REPOSITORY/pulls/$pr/reviews" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query reviews" >&2; return 2; fi
   if ! commits="$(api "repos/$GITHUB_REPOSITORY/pulls/$pr/commits" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query commits" >&2; return 2; fi
   if ! events="$(api "repos/$head_repository/events" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query head-repository push events" >&2; return 2; fi
   if ! activity_times="$(jq -r -n --arg author "$author" --arg created "$created_at" --arg ref "refs/heads/$head_ref" --slurpfile comments <(printf '%s' "$comments") --slurpfile commits <(printf '%s' "$commits") --slurpfile events <(printf '%s' "$events") '[ $created, ($comments[0] | flatten[]? | select(.user.login == $author and .user.type != "Bot") | (.updated_at // .created_at)), ($commits[0] | flatten[]? | select(.author.type != "Bot" and .committer.type != "Bot") | (.commit.committer.date // .commit.author.date)), ($events[0] | flatten[]? | select(.type == "PushEvent" and .payload.ref == $ref and .actor.type != "Bot") | .created_at) ] | map(select(. != null)) | .[]')"; then
@@ -89,7 +90,7 @@ latest_contributor_activity() {
   # A recent human edit or review from someone other than the PR author is
   # not contributor activity, but it must prevent a later bot update from
   # making the PR look safely inactive.
-  if ! human_activity_times="$(jq -r -n --arg ref "refs/heads/$head_ref" --slurpfile comments <(printf '%s' "$comments") --slurpfile review_comments <(printf '%s' "$review_comments") --slurpfile commits <(printf '%s' "$commits") --slurpfile events <(printf '%s' "$events") '[ ($comments[0] | flatten[]? | select(.user.type != "Bot") | (.updated_at // .created_at)), ($review_comments[0] | flatten[]? | select(.user.type != "Bot") | (.updated_at // .created_at)), ($commits[0] | flatten[]? | select(.author.type != "Bot" and .committer.type != "Bot") | (.commit.committer.date // .commit.author.date)), ($events[0] | flatten[]? | select(.type == "PushEvent" and .payload.ref == $ref and .actor.type != "Bot") | .created_at) ] | map(select(. != null)) | .[]')"; then
+  if ! human_activity_times="$(jq -r -n --arg ref "refs/heads/$head_ref" --slurpfile comments <(printf '%s' "$comments") --slurpfile review_comments <(printf '%s' "$review_comments") --slurpfile reviews <(printf '%s' "$reviews") --slurpfile commits <(printf '%s' "$commits") --slurpfile events <(printf '%s' "$events") '[ ($comments[0] | flatten[]? | select(.user.type != "Bot") | (.updated_at // .created_at)), ($review_comments[0] | flatten[]? | select(.user.type != "Bot") | (.updated_at // .created_at)), ($reviews[0] | flatten[]? | select(.user.type != "Bot" and .submitted_at != null) | .submitted_at), ($commits[0] | flatten[]? | select(.author.type != "Bot" and .committer.type != "Bot") | (.commit.committer.date // .commit.author.date)), ($events[0] | flatten[]? | select(.type == "PushEvent" and .payload.ref == $ref and .actor.type != "Bot") | .created_at) ] | map(select(. != null)) | .[]')"; then
     echo "Skipping PR #$pr: could not read human activity timestamps" >&2; return 2
   fi
   while IFS= read -r candidate; do
@@ -99,10 +100,10 @@ latest_contributor_activity() {
     fi
     (( epoch > human_latest_epoch )) && human_latest_epoch="$epoch"
   done <<< "$human_activity_times"
-  # GitHub's updatedAt includes action and bot activity.  Do not let an update
-  # we can positively identify as bot activity restart the contributor clock;
-  # retain the conservative deferral for every update that remains ambiguous.
-  if ! bot_activity_times="$(jq -r -n --slurpfile comments <(printf '%s' "$comments") '[ $comments[0] | flatten[]? | select(.user.type == "Bot") | (.updated_at // .created_at) ] | map(select(. != null)) | .[]')"; then
+  # GitHub's updatedAt includes action and bot activity. A REST issue comment
+  # identifies its original author, not its editor, so only an unedited bot
+  # comment is safe attribution. Any edited bot comment remains ambiguous.
+  if ! bot_activity_times="$(jq -r -n --slurpfile comments <(printf '%s' "$comments") '[ $comments[0] | flatten[]? | select(.user.type == "Bot" and ((.updated_at // .created_at) == .created_at)) | .created_at ] | map(select(. != null)) | .[]')"; then
     echo "Skipping PR #$pr: could not read bot activity timestamps" >&2; return 2
   fi
   while IFS= read -r candidate; do
