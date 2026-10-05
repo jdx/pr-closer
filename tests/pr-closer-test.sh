@@ -13,8 +13,12 @@ echo "$*" >> "$GH_LOG"
 scenario="${SCENARIO:?}"
 if [[ "$1 $2" == "pr list" ]]; then
   case "$scenario" in
-    feedback|human|pagination|repeat|draft-failure) echo '[{"number":1,"author":{"login":"alice"},"createdAt":"2026-10-03T00:00:00Z","updatedAt":"2026-10-03T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/alice"},"isDraft":false}]' ;;
+    feedback|human|pagination|repeat|draft-failure|resolved-feedback|ambiguous-author|human-marker) echo '[{"number":1,"author":{"login":"alice"},"createdAt":"2026-10-03T00:00:00Z","updatedAt":"2026-10-03T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/alice"},"isDraft":false}]' ;;
+    draft-feedback|draft-repeat) echo '[{"number":4,"author":{"login":"alice"},"createdAt":"2026-10-03T00:00:00Z","updatedAt":"2026-10-03T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/alice"},"isDraft":true}]' ;;
     inactive|bot-activity|bot-push|lookup-failure|feedback-lookup-failure|activity-pagination|human-commit|offset-commit|commits-failure) echo '[{"number":2,"author":{"login":"alice"},"createdAt":"2026-09-01T00:00:00Z","updatedAt":"2026-09-01T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/alice"},"isDraft":false}]' ;;
+    mise-bot-warning|edited-bot-warning|recent-unknown) echo '[{"number":12786,"author":{"login":"risu729"},"createdAt":"2026-09-01T00:00:00Z","updatedAt":"2026-10-01T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/risu729"},"isDraft":true}]' ;;
+    human-review-before-bot|human-review-submission-before-bot|human-edit-before-bot|edited-bot-then-bot|edited-review-bot-then-bot) echo '[{"number":12786,"author":{"login":"risu729"},"createdAt":"2026-09-01T00:00:00Z","updatedAt":"2026-10-03T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/risu729"},"isDraft":true}]' ;;
+    future-bot-timestamp) echo '[{"number":12786,"author":{"login":"risu729"},"createdAt":"2026-09-01T00:00:00Z","updatedAt":"2026-10-01T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/risu729"},"isDraft":true}]' ;;
     ambiguous-update) echo '[{"number":2,"author":{"login":"alice"},"createdAt":"2026-09-01T00:00:00Z","updatedAt":"2026-10-03T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/alice"},"isDraft":false}]' ;;
     old-push-recent-update) echo '[{"number":2,"author":{"login":"alice"},"createdAt":"2026-09-01T00:00:00Z","updatedAt":"2026-10-03T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/alice"},"isDraft":false}]' ;;
     old-ambiguous-update) echo '[{"number":2,"author":{"login":"alice"},"createdAt":"2026-09-01T00:00:00Z","updatedAt":"2026-09-02T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/alice"},"isDraft":false}]' ;;
@@ -35,10 +39,14 @@ if [[ "$1 $2" == "api graphql" ]]; then
     echo '{}'
   elif [[ "$scenario" == pagination && "$*" != *'cursor=cursor-2'* ]]; then
     echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":true,"endCursor":"cursor-2"},"nodes":[]}}}}}'
-  elif [[ "$scenario" == feedback || "$scenario" == pagination || "$scenario" == repeat || "$scenario" == draft-failure ]]; then
+  elif [[ "$scenario" == feedback || "$scenario" == pagination || "$scenario" == repeat || "$scenario" == draft-failure || "$scenario" == draft-feedback || "$scenario" == draft-repeat || "$scenario" == human-marker ]]; then
     echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"isResolved":false,"isOutdated":false,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"author":{"__typename":"Bot","login":"review-bot"},"pullRequestReview":{"state":"COMMENTED"}}]}}]}}}}}'
   elif [[ "$scenario" == human ]]; then
     echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"isResolved":false,"isOutdated":false,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"author":{"__typename":"User","login":"reviewer"},"pullRequestReview":{"state":"COMMENTED"}}]}}]}}}}}'
+  elif [[ "$scenario" == resolved-feedback ]]; then
+    echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"isResolved":true,"isOutdated":false,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"author":{"__typename":"Bot","login":"review-bot"},"pullRequestReview":{"state":"COMMENTED"}}]}}]}}}}}'
+  elif [[ "$scenario" == ambiguous-author ]]; then
+    echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"isResolved":false,"isOutdated":false,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"author":null,"pullRequestReview":{"state":"COMMENTED"}}]}}]}}}}}'
   else
     echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}'
   fi
@@ -54,8 +62,16 @@ if [[ "$path" == *'/events' ]]; then
   if [[ "$scenario" == activity-pagination ]]; then echo '[[],[{"type":"PushEvent","actor":{"type":"User"},"payload":{"ref":"refs/heads/feature"},"created_at":"2026-10-03T00:00:00Z"}]]'; elif [[ "$scenario" == old-push-recent-update ]]; then echo '[[{"type":"PushEvent","actor":{"type":"User"},"payload":{"ref":"refs/heads/feature"},"created_at":"2026-09-02T00:00:00Z"}]]'; elif [[ "$scenario" == bot-push ]]; then echo '[[{"type":"PushEvent","actor":{"type":"Bot"},"payload":{"ref":"refs/heads/feature"},"created_at":"2026-10-03T00:00:00Z"}]]'; else echo '[[]]'; fi
   exit 0
 fi
+if [[ "$path" == *'/pulls/'*'/comments' ]]; then
+  if [[ "$scenario" == human-review-before-bot ]]; then echo '[[{"user":{"login":"reviewer","type":"User"},"created_at":"2026-10-02T00:00:00Z","updated_at":"2026-10-02T00:00:00Z","body":"please address this"}]]'; elif [[ "$scenario" == edited-review-bot-then-bot ]]; then echo '[[{"user":{"login":"review-bot","type":"Bot"},"created_at":"2026-09-20T00:00:00Z","updated_at":"2026-10-02T00:00:00Z","body":"edited review"}]]'; else echo '[[]]'; fi
+  exit 0
+fi
+if [[ "$path" == *'/pulls/'*'/reviews' ]]; then
+  if [[ "$scenario" == human-review-submission-before-bot ]]; then echo '[[{"user":{"login":"reviewer","type":"User"},"state":"CHANGES_REQUESTED","submitted_at":"2026-10-02T00:00:00Z"}]]'; else echo '[[]]'; fi
+  exit 0
+fi
 if [[ "$path" == *'/comments' ]]; then
-  if [[ "$scenario" == bot-activity ]]; then echo '[[{"user":{"login":"ci[bot]","type":"Bot"},"created_at":"2026-10-03T00:00:00Z","body":"bot"}]]'; elif [[ "$scenario" == activity-pagination ]]; then echo '[[],[{"user":{"login":"alice","type":"User"},"created_at":"2026-10-03T00:00:00Z","body":"progress"}]]'; elif [[ "$scenario" == repeat ]]; then echo '[[{"user":{"login":"github-actions[bot]","type":"Bot"},"created_at":"2026-10-03T00:00:00Z","body":"<!-- pr-closer-automated-feedback-draft -->"}]]'; else echo '[[]]'; fi
+  if [[ "$scenario" == bot-activity ]]; then echo '[[{"user":{"login":"ci[bot]","type":"Bot"},"created_at":"2026-10-03T00:00:00Z","body":"bot"}]]'; elif [[ "$scenario" == activity-pagination ]]; then echo '[[],[{"user":{"login":"alice","type":"User"},"created_at":"2026-10-03T00:00:00Z","body":"progress"}]]'; elif [[ "$scenario" == repeat || "$scenario" == draft-repeat ]]; then echo '[[{"user":{"login":"github-actions[bot]","type":"Bot"},"created_at":"2026-10-03T00:00:00Z","body":"<!-- pr-closer-automated-feedback-draft -->"}]]'; elif [[ "$scenario" == human-marker ]]; then echo '[[{"user":{"login":"reviewer","type":"User"},"created_at":"2026-10-03T00:00:00Z","body":"<!-- pr-closer-automated-feedback-draft -->"}]]'; elif [[ "$scenario" == mise-bot-warning ]]; then echo '[[{"user":{"login":"risu729","type":"User"},"created_at":"2026-09-05T00:00:00Z","body":"progress"},{"user":{"login":"github-actions[bot]","type":"Bot"},"created_at":"2026-10-01T00:00:00Z","updated_at":"2026-10-01T00:00:00Z","body":"warning"}]]'; elif [[ "$scenario" == edited-bot-warning ]]; then echo '[[{"user":{"login":"risu729","type":"User"},"created_at":"2026-09-05T00:00:00Z","body":"progress"},{"user":{"login":"github-actions[bot]","type":"Bot"},"created_at":"2026-09-20T00:00:00Z","updated_at":"2026-10-01T00:00:00Z","body":"warning"}]]'; elif [[ "$scenario" == recent-unknown ]]; then echo '[[{"user":{"login":"reviewer","type":"User"},"created_at":"2026-10-01T00:00:00Z","body":"question"}]]'; elif [[ "$scenario" == human-review-before-bot || "$scenario" == human-review-submission-before-bot ]]; then echo '[[{"user":{"login":"risu729","type":"User"},"created_at":"2026-09-05T00:00:00Z","body":"progress"},{"user":{"login":"github-actions[bot]","type":"Bot"},"created_at":"2026-10-03T00:00:00Z","updated_at":"2026-10-03T00:00:00Z","body":"warning"}]]'; elif [[ "$scenario" == human-edit-before-bot ]]; then echo '[[{"user":{"login":"reviewer","type":"User"},"created_at":"2026-09-05T00:00:00Z","updated_at":"2026-10-02T00:00:00Z","body":"edited question"},{"user":{"login":"github-actions[bot]","type":"Bot"},"created_at":"2026-10-03T00:00:00Z","updated_at":"2026-10-03T00:00:00Z","body":"warning"}]]'; elif [[ "$scenario" == edited-bot-then-bot ]]; then echo '[[{"user":{"login":"github-actions[bot]","type":"Bot"},"created_at":"2026-09-20T00:00:00Z","updated_at":"2026-10-02T00:00:00Z","body":"edited warning"},{"user":{"login":"github-actions[bot]","type":"Bot"},"created_at":"2026-10-03T00:00:00Z","updated_at":"2026-10-03T00:00:00Z","body":"new warning"}]]'; elif [[ "$scenario" == edited-review-bot-then-bot ]]; then echo '[[{"user":{"login":"github-actions[bot]","type":"Bot"},"created_at":"2026-10-03T00:00:00Z","updated_at":"2026-10-03T00:00:00Z","body":"new warning"}]]'; elif [[ "$scenario" == future-bot-timestamp ]]; then echo '[[{"user":{"login":"github-actions[bot]","type":"Bot"},"created_at":"2026-10-02T00:00:00Z","updated_at":"2026-10-02T00:00:00Z","body":"warning"}]]'; else echo '[[]]'; fi
   exit 0
 fi
 if [[ "$path" == *'/commits' ]]; then
@@ -83,10 +99,24 @@ assert_contains "$tmp/feedback.log" 'pr comment 1'
 run_case repeat
 assert_contains "$tmp/repeat.log" 'pr ready 1'
 assert_absent "$tmp/repeat.log" 'pr comment 1'
+run_case human-marker
+assert_contains "$tmp/human-marker.log" 'pr comment 1'
+run_case draft-feedback
+assert_contains "$tmp/draft-feedback.log" 'pr comment 4'
+assert_absent "$tmp/draft-feedback.log" 'pr ready 4'
+run_case draft-repeat
+assert_absent "$tmp/draft-repeat.log" 'pr comment 4'
+assert_absent "$tmp/draft-repeat.log" 'pr ready 4'
 run_case pagination
 assert_contains "$tmp/pagination.log" 'pr ready 1'
 run_case human
 assert_absent "$tmp/human.log" 'pr ready'
+run_case resolved-feedback
+assert_absent "$tmp/resolved-feedback.log" 'pr ready'
+assert_absent "$tmp/resolved-feedback.log" 'pr comment'
+run_case ambiguous-author
+assert_absent "$tmp/ambiguous-author.log" 'pr ready'
+assert_absent "$tmp/ambiguous-author.log" 'pr comment'
 run_case inactive
 assert_contains "$tmp/inactive.log" 'pr close 2'
 run_case bot-activity
@@ -105,6 +135,24 @@ run_case old-push-recent-update
 assert_absent "$tmp/old-push-recent-update.log" 'pr close 2'
 run_case old-ambiguous-update
 assert_contains "$tmp/old-ambiguous-update.log" 'pr close 2'
+run_case mise-bot-warning
+assert_contains "$tmp/mise-bot-warning.log" 'pr close 12786'
+run_case edited-bot-warning
+assert_absent "$tmp/edited-bot-warning.log" 'pr close 12786'
+run_case recent-unknown
+assert_absent "$tmp/recent-unknown.log" 'pr close 12786'
+run_case human-review-before-bot
+assert_absent "$tmp/human-review-before-bot.log" 'pr close 12786'
+run_case human-review-submission-before-bot
+assert_absent "$tmp/human-review-submission-before-bot.log" 'pr close 12786'
+run_case human-edit-before-bot
+assert_absent "$tmp/human-edit-before-bot.log" 'pr close 12786'
+run_case future-bot-timestamp
+assert_absent "$tmp/future-bot-timestamp.log" 'pr close 12786'
+run_case edited-bot-then-bot
+assert_absent "$tmp/edited-bot-then-bot.log" 'pr close 12786'
+run_case edited-review-bot-then-bot
+assert_absent "$tmp/edited-review-bot-then-bot.log" 'pr close 12786'
 run_case maintainer
 assert_absent "$tmp/maintainer.log" 'pr close'
 assert_absent "$tmp/maintainer.log" 'pr ready'

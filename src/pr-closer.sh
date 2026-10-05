@@ -13,7 +13,8 @@ IGNORED_LABEL="${IGNORED_LABEL:-}"
 IGNORED_LABELS="${IGNORED_LABELS:-keep-open}"
 LIMIT="${LIMIT:-500}"
 NOW="${NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
-DRAFT_MARKER="<!-- pr-closer-automated-feedback-draft -->"
+# Kept stable so warnings posted by older action versions remain idempotent.
+AI_FEEDBACK_WARNING_MARKER="<!-- pr-closer-automated-feedback-draft -->"
 
 if ! [[ "$CLOSE_AFTER_DAYS" =~ ^[0-9]+$ ]] || (( CLOSE_AFTER_DAYS < 1 )); then
   echo "close-after-days must be a positive integer" >&2; exit 1
@@ -26,6 +27,7 @@ api() { gh api "$@"; }
 comment_pr() { local pr="$1" body="$2"; [[ "$DRY_RUN" == true ]] && { echo "Would comment on PR #$pr:"; echo "$body"; } || gh pr comment "$pr" -R "$GITHUB_REPOSITORY" --body "$body"; }
 close_pr() { local pr="$1" body="$2"; [[ "$DRY_RUN" == true ]] && { echo "Would close PR #$pr:"; echo "$body"; } || gh pr close "$pr" -R "$GITHUB_REPOSITORY" -c "$body"; }
 draft_pr() { local pr="$1"; [[ "$DRY_RUN" == true ]] && echo "Would convert PR #$pr to draft" || gh pr ready "$pr" -R "$GITHUB_REPOSITORY" --undo; }
+has_ai_feedback_warning() { jq -e --arg marker "$AI_FEEDBACK_WARNING_MARKER" '[flatten[]? | select(.user.type == "Bot" and ((.body // "") | contains($marker)))] | length > 0' >/dev/null; }
 
 append_search_exclusions() {
   local field="$1" values="$2"
@@ -66,14 +68,17 @@ has_active_automated_feedback() {
 }
 
 latest_contributor_activity() {
-  local pr="$1" author="$2" created_at="$3" updated_at="$4" head_ref="$5" head_repository="$6" comments commits events activity_times candidate epoch latest="" latest_epoch=0 updated_epoch
+  local pr="$1" author="$2" created_at="$3" updated_at="$4" head_ref="$5" head_repository="$6" comments review_comments reviews commits events activity_times human_activity_times ambiguous_activity_times bot_activity_times candidate epoch latest="" latest_epoch=0 human_latest_epoch=0 ambiguous_latest_epoch=0 bot_latest_epoch=0 updated_epoch
   if ! comments="$(api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query issue comments" >&2; return 2; fi
+  if ! review_comments="$(api "repos/$GITHUB_REPOSITORY/pulls/$pr/comments" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query review comments" >&2; return 2; fi
+  if ! reviews="$(api "repos/$GITHUB_REPOSITORY/pulls/$pr/reviews" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query reviews" >&2; return 2; fi
   if ! commits="$(api "repos/$GITHUB_REPOSITORY/pulls/$pr/commits" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query commits" >&2; return 2; fi
   if ! events="$(api "repos/$head_repository/events" --paginate --slurp)"; then echo "Skipping PR #$pr: could not query head-repository push events" >&2; return 2; fi
-  if ! activity_times="$(jq -r -n --arg author "$author" --arg created "$created_at" --arg ref "refs/heads/$head_ref" --slurpfile comments <(printf '%s' "$comments") --slurpfile commits <(printf '%s' "$commits") --slurpfile events <(printf '%s' "$events") '[ $created, ($comments[0] | flatten[]? | select(.user.login == $author and .user.type != "Bot") | .created_at), ($commits[0] | flatten[]? | select(.author.type != "Bot" and .committer.type != "Bot") | (.commit.committer.date // .commit.author.date)), ($events[0] | flatten[]? | select(.type == "PushEvent" and .payload.ref == $ref and .actor.type != "Bot") | .created_at) ] | map(select(. != null)) | .[]')"; then
+  if ! activity_times="$(jq -r -n --arg author "$author" --arg created "$created_at" --arg ref "refs/heads/$head_ref" --slurpfile comments <(printf '%s' "$comments") --slurpfile commits <(printf '%s' "$commits") --slurpfile events <(printf '%s' "$events") '[ $created, ($comments[0] | flatten[]? | select(.user.login == $author and .user.type != "Bot") | (.updated_at // .created_at)), ($commits[0] | flatten[]? | select(.author.type != "Bot" and .committer.type != "Bot") | (.commit.committer.date // .commit.author.date)), ($events[0] | flatten[]? | select(.type == "PushEvent" and .payload.ref == $ref and .actor.type != "Bot") | .created_at) ] | map(select(. != null)) | .[]')"; then
     echo "Skipping PR #$pr: could not read contributor activity timestamps" >&2; return 2
   fi
   while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
     if ! epoch="$(date -u -d "$candidate" +%s)"; then
       echo "Skipping PR #$pr: could not parse contributor activity timestamp" >&2; return 2
     fi
@@ -82,10 +87,57 @@ latest_contributor_activity() {
       latest_epoch="$epoch"
     fi
   done <<< "$activity_times"
+  # A recent human edit or review from someone other than the PR author is
+  # not contributor activity, but it must prevent a later bot update from
+  # making the PR look safely inactive.
+  if ! human_activity_times="$(jq -r -n --arg ref "refs/heads/$head_ref" --slurpfile comments <(printf '%s' "$comments") --slurpfile review_comments <(printf '%s' "$review_comments") --slurpfile reviews <(printf '%s' "$reviews") --slurpfile commits <(printf '%s' "$commits") --slurpfile events <(printf '%s' "$events") '[ ($comments[0] | flatten[]? | select(.user.type != "Bot") | (.updated_at // .created_at)), ($review_comments[0] | flatten[]? | select(.user.type != "Bot") | (.updated_at // .created_at)), ($reviews[0] | flatten[]? | select(.user.type != "Bot" and .submitted_at != null) | .submitted_at), ($commits[0] | flatten[]? | select(.author.type != "Bot" and .committer.type != "Bot") | (.commit.committer.date // .commit.author.date)), ($events[0] | flatten[]? | select(.type == "PushEvent" and .payload.ref == $ref and .actor.type != "Bot") | .created_at) ] | map(select(. != null)) | .[]')"; then
+    echo "Skipping PR #$pr: could not read human activity timestamps" >&2; return 2
+  fi
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    if ! epoch="$(date -u -d "$candidate" +%s)"; then
+      echo "Skipping PR #$pr: could not parse human activity timestamp" >&2; return 2
+    fi
+    (( epoch > human_latest_epoch )) && human_latest_epoch="$epoch"
+  done <<< "$human_activity_times"
+  if ! ambiguous_activity_times="$(jq -r -n --slurpfile comments <(printf '%s' "$comments") --slurpfile review_comments <(printf '%s' "$review_comments") '[ ($comments[0] | flatten[]? | select(.user.type == "Bot" and .updated_at != null and .updated_at != .created_at) | .updated_at), ($review_comments[0] | flatten[]? | select(.user.type == "Bot" and .updated_at != null and .updated_at != .created_at) | .updated_at) ] | map(select(. != null)) | .[]')"; then
+    echo "Skipping PR #$pr: could not read ambiguous activity timestamps" >&2; return 2
+  fi
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    if ! epoch="$(date -u -d "$candidate" +%s)"; then
+      echo "Skipping PR #$pr: could not parse ambiguous activity timestamp" >&2; return 2
+    fi
+    (( epoch > ambiguous_latest_epoch )) && ambiguous_latest_epoch="$epoch"
+  done <<< "$ambiguous_activity_times"
+  # GitHub's updatedAt includes action and bot activity. A REST issue comment
+  # identifies its original author, not its editor, so only an unedited bot
+  # comment is safe attribution. Any edited bot comment remains ambiguous.
+  if ! bot_activity_times="$(jq -r -n --slurpfile comments <(printf '%s' "$comments") '[ $comments[0] | flatten[]? | select(.user.type == "Bot" and ((.updated_at // .created_at) == .created_at)) | .created_at ] | map(select(. != null)) | .[]')"; then
+    echo "Skipping PR #$pr: could not read bot activity timestamps" >&2; return 2
+  fi
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    if ! epoch="$(date -u -d "$candidate" +%s)"; then
+      echo "Skipping PR #$pr: could not parse bot activity timestamp" >&2; return 2
+    fi
+    (( epoch > bot_latest_epoch )) && bot_latest_epoch="$epoch"
+  done <<< "$bot_activity_times"
   if ! updated_epoch="$(date -u -d "$updated_at" +%s)"; then
     echo "Skipping PR #$pr: could not parse pull request update timestamp" >&2; return 2
   fi
-  if (( updated_epoch > latest_epoch && updated_epoch > cutoff_epoch )); then
+  if (( human_latest_epoch > latest_epoch && human_latest_epoch > cutoff_epoch )); then
+    echo "Deferring inactive close for PR #$pr: a newer human update is not contributor activity" >&2
+    return 3
+  fi
+  if (( ambiguous_latest_epoch > cutoff_epoch )); then
+    echo "Deferring inactive close for PR #$pr: a recent bot-comment edit cannot be attributed safely" >&2
+    return 3
+  fi
+  # Only an update at the exact timestamp of known bot activity is safe to
+  # ignore. A merely newer (or future-dated) bot timestamp cannot explain the
+  # update and must keep the fail-closed attribution guard in place.
+  if (( updated_epoch > latest_epoch && updated_epoch > cutoff_epoch && updated_epoch != bot_latest_epoch )); then
     echo "Deferring inactive close for PR #$pr: a newer update cannot be attributed safely" >&2
     return 3
   fi
@@ -93,24 +145,30 @@ latest_contributor_activity() {
 }
 
 maybe_draft_for_feedback() {
-  local pr="$1" is_draft="$2" comments status
-  [[ "$is_draft" == true ]] && return
+  local pr="$1" is_draft="$2" comments status warning_body
   if has_active_automated_feedback "$pr"; then status=0; else status=$?; fi
   [[ $status -eq 0 ]] || { [[ $status -eq 1 ]] && return 0; return 2; }
   if ! comments="$(api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate --slurp)"; then echo "Skipping draft action for PR #$pr: could not inspect explanatory comments" >&2; return 2; fi
-  if jq -e --arg marker "$DRAFT_MARKER" '[flatten[]? | select(.body | contains($marker))] | length > 0' >/dev/null <<< "$comments"; then echo "PR #$pr already has an automated-feedback explanation"; else
-    if ! comment_pr "$pr" "$(cat <<EOF
-This PR has unresolved automated review feedback and is being converted to draft. Please resolve the feedback and mark it ready for review when you are ready to continue.
+  if has_ai_feedback_warning <<< "$comments"; then echo "PR #$pr already has an AI-feedback warning"; else
+    warning_body="This PR has unresolved AI review feedback. Please address or resolve the review threads, then mark the PR ready for review when you are ready to continue. See the repository's contributing guidance for the expected review process.
 
 *This comment was generated by an automated workflow.*
 
-$DRAFT_MARKER
-EOF
-)"; then
+$AI_FEEDBACK_WARNING_MARKER"
+    # Re-read immediately before posting so overlapping scheduled/manual runs
+    # normally observe the marker written by the other run.
+    if ! comments="$(api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate --slurp)"; then
+      echo "Skipping draft action for PR #$pr: could not recheck AI-feedback warnings" >&2
+      return 2
+    fi
+    if has_ai_feedback_warning <<< "$comments"; then
+      echo "PR #$pr already has an AI-feedback warning"
+    elif ! comment_pr "$pr" "$warning_body"; then
       echo "Skipping PR #$pr: could not post the automated-feedback explanation" >&2
       return 2
     fi
   fi
+  [[ "$is_draft" == true ]] && return
   if ! draft_pr "$pr"; then
     echo "Skipping PR #$pr: could not convert it to draft" >&2
     return 2

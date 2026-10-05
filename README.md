@@ -16,6 +16,12 @@ on:
     - cron: "0 0 * * *"
   workflow_dispatch:
 
+# Prevent a manual run and the schedule from evaluating/commenting on the
+# same pull request at the same time.
+concurrency:
+  group: pr-closer-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   pr-closer:
     runs-on: ubuntu-latest
@@ -58,6 +64,8 @@ jobs:
 ## Behavior
 
 Every run inspects open pull requests, skipping the configured authors and labels. Authors with verified `write`, `maintain`, or `admin` repository permission are also exempt from every action. If the action cannot verify permissions, activity, feedback, or comments for a pull request, it skips that pull request rather than acting on incomplete information.
+
+In particular, if automated-feedback lookup fails, the action also skips the inactive-close step for that PR. This fail-closed behavior avoids closing a PR while review state is unknown.
 
 For a ready PR, the action immediately converts it to draft when GitHub reports an unresolved, non-outdated review thread that contains feedback from a GitHub `Bot` account whose review is not dismissed. It leaves one explanatory comment, marked to avoid repeats. It never marks a PR ready again; the contributor does that.
 
