@@ -11,6 +11,17 @@ cat > "$tmp/bin/gh" <<'EOF'
 set -euo pipefail
 echo "$*" >> "$GH_LOG"
 scenario="${SCENARIO:?}"
+if [[ "$1 $2" == "pr list" && " $* " == *" --author "* ]]; then
+  case "$scenario" in
+    blocked) echo '[{"number":5,"createdAt":"2026-10-05T00:00:00Z"},{"number":6,"createdAt":"2026-10-04T23:59:59Z"},{"number":7,"createdAt":"2026-10-03T00:00:00Z"}]' ;;
+    blocked-nr) echo '[{"number":5,"createdAt":"2026-10-05T00:00:00Z"}]' ;;
+    blocked-default) echo '[{"number":10,"createdAt":"2026-10-07T00:00:00Z"},{"number":11,"createdAt":"2026-10-06T23:59:59Z"}]' ;;
+    blocked-maintainer) echo '[{"number":8,"createdAt":"2026-10-05T00:00:00Z"}]' ;;
+    blocked-lookup-failure) echo '[{"number":9,"createdAt":"2026-10-05T00:00:00Z"}]' ;;
+    *) echo '[]' ;;
+  esac
+  exit 0
+fi
 if [[ "$1 $2" == "pr list" ]]; then
   case "$scenario" in
     feedback|human|pagination|repeat|draft-failure|resolved-feedback|ambiguous-author|human-marker) echo '[{"number":1,"author":{"login":"alice"},"createdAt":"2026-10-03T00:00:00Z","updatedAt":"2026-10-03T00:00:00Z","headRefName":"feature","headRepository":{"nameWithOwner":"fork/alice"},"isDraft":false}]' ;;
@@ -54,8 +65,8 @@ if [[ "$1 $2" == "api graphql" ]]; then
 fi
 path="$2"
 if [[ "$path" == *'/permission' ]]; then
-  [[ "$scenario" == lookup-failure ]] && exit 1
-  [[ "$scenario" == maintainer ]] && { echo write; exit 0; }
+  [[ "$scenario" == lookup-failure || "$scenario" == blocked-lookup-failure ]] && exit 1
+  [[ "$scenario" == maintainer || "$scenario" == blocked-maintainer ]] && { echo write; exit 0; }
   echo read; exit 0
 fi
 if [[ "$path" == *'/events' ]]; then
@@ -166,5 +177,31 @@ run_case draft-failure
 assert_contains "$tmp/draft-failure.log" 'pr ready 1'
 assert_contains "$tmp/draft-failure.log" 'pr comment 1'
 assert_absent "$tmp/draft-failure.log" 'pr close 1'
+
+CLOSED_AUTHORS=mallory CLOSED_AFTER=2026-10-04 run_case blocked
+assert_contains "$tmp/blocked.log" 'pr close 5'
+assert_absent "$tmp/blocked.log" 'pr close 6'
+assert_absent "$tmp/blocked.log" 'pr close 7'
+assert_contains "$tmp/blocked.log" 'author mallory'
+assert_contains "$tmp/blocked.log" 'because the author is using multiple accounts, so this PR'
+CLOSED_AUTHORS=mallory CLOSED_AFTER=2026-10-04 CLOSED_REASON= run_case blocked-nr
+assert_absent "$tmp/blocked-nr.log" 'because'
+CLOSED_AUTHORS=mallory CLOSED_AFTER=2026-10-04 run_case blocked-maintainer
+assert_absent "$tmp/blocked-maintainer.log" 'pr close'
+CLOSED_AUTHORS=mallory CLOSED_AFTER=2026-10-04 run_case blocked-lookup-failure
+assert_absent "$tmp/blocked-lookup-failure.log" 'pr close'
+rm -f "$tmp/blocked.log"
+CLOSED_AUTHORS=mallory CLOSED_AFTER=2026-10-04 DRY_RUN=true run_case blocked
+assert_absent "$tmp/blocked.log" 'pr close'
+assert_contains "$tmp/blocked.out" 'Would close PR #5'
+if CLOSED_AFTER=tomorrow CLOSED_AUTHORS=mallory GH_LOG="$tmp/no-date.log" SCENARIO=blocked PATH="$tmp/bin:$PATH" GITHUB_REPOSITORY=test/repo GH_TOKEN=x "$root/src/pr-closer.sh" > "$tmp/no-date.out" 2>&1; then
+  echo "expected an invalid closed-after to fail" >&2; exit 1
+fi
+assert_contains "$tmp/no-date.out" 'closed-after must be'
+
+run_case blocked-default
+assert_contains "$tmp/blocked-default.log" 'author Marukome0743'
+assert_contains "$tmp/blocked-default.log" 'pr close 10'
+assert_absent "$tmp/blocked-default.log" 'pr close 11'
 
 echo "pr-closer tests passed"

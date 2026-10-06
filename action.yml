@@ -20,6 +20,17 @@ inputs:
   ignored-labels:
     description: Comma-separated or newline-separated pull request labels to ignore.
     default: keep-open
+  closed-authors:
+    description: Comma-separated or newline-separated pull request authors whose pull requests created after closed-after are closed.
+    default: Marukome0743
+  closed-author:
+    description: Additional author whose pull requests created after closed-after are closed. Prefer closed-authors for multiple authors.
+  closed-after:
+    description: Date (YYYY-MM-DD, UTC). Only pull requests from closed-authors created on a later day are closed.
+    default: "2026-10-06"
+  closed-reason:
+    description: Reason given in the comment on a closed pull request, completing "not being accepted in this repository because <reason>". Optional.
+    default: the author is using multiple accounts
   github-token:
     description: GitHub token used to list, comment on, and close pull requests.
   limit:
@@ -36,6 +47,10 @@ runs:
       shell: bash
       env:
         CLOSE_AFTER_DAYS: ${{ inputs.close-after-days }}
+        CLOSED_AFTER: ${{ inputs.closed-after }}
+        CLOSED_AUTHOR: ${{ inputs.closed-author }}
+        CLOSED_AUTHORS: ${{ inputs.closed-authors }}
+        CLOSED_REASON: ${{ inputs.closed-reason }}
         DRY_RUN: ${{ inputs.dry-run }}
         GH_TOKEN: ${{ inputs.github-token || github.token }}
         IGNORED_AUTHOR: ${{ inputs.ignored-author }}
