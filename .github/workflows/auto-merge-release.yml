@@ -31,7 +31,15 @@ jobs:
             latest_tag=$(git describe --tags --match 'v[0-9]*' --abbrev=0 || true)
             if [ -n "$latest_tag" ]; then
               range="${latest_tag}..HEAD"
-              tag_time=$(git for-each-ref --format='%(creatordate:unix)' "refs/tags/$latest_tag")
+              # Tags here are lightweight, so their creatordate is the tagged
+              # commit's date. Measure from when the GitHub release was
+              # published instead, which is when users could first install it.
+              published_at=$(gh release view -R jdx/pr-closer --json publishedAt --jq '.publishedAt // empty' || true)
+              if [ -n "$published_at" ]; then
+                tag_time=$(date -d "$published_at" +%s)
+              else
+                tag_time=$(git for-each-ref --format='%(creatordate:unix)' "refs/tags/$latest_tag")
+              fi
               now=$(date +%s)
               min_age=$((7 * 24 * 60 * 60))
               age=$((now - tag_time))
