@@ -41,10 +41,10 @@ jobs:
                 tag_time=$(git for-each-ref --format='%(creatordate:unix)' "refs/tags/$latest_tag")
               fi
               now=$(date +%s)
-              min_age=$((7 * 24 * 60 * 60))
+              min_age=$((2 * 24 * 60 * 60))
               age=$((now - tag_time))
               if [ "$age" -lt "$min_age" ]; then
-                echo "Latest release ${latest_tag} is less than 7 days old; not auto-merging release PRs"
+                echo "Latest release ${latest_tag} is less than 2 days old; not auto-merging release PRs"
                 exit 0
               fi
             else
