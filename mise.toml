@@ -1,5 +1,5 @@
 tasks.release-plz = "bash scripts/release-plz.sh"
 
 [tools]
-gh = "2.102.0"
+gh = "2.103.0"
 git-cliff = "2.14.2"
