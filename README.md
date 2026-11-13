@@ -101,6 +101,20 @@ permissions:
 
 The action uses the GitHub CLI and `jq`, both of which are available on `ubuntu-latest`.
 
+## Testing
+
+Run the regression suite in a disposable Linux container:
+
+```sh
+docker build --file Dockerfile.test .
+```
+
+The suite replaces the GitHub CLI with a mock and checks automated feedback,
+inactivity, pagination, permission lookup failures, and author-specific closure
+rules without changing real pull requests or requiring GitHub credentials.
+CI runs this same command for every pull request, including dependency updates,
+and pushes to `main`.
+
 ## Releasing
 
 The `release-plz` workflow runs after pushes to `main`. When there are unreleased changes, it updates `VERSION` on the `release` branch and opens or updates a pull request with the `release` label. The workflow uses `RELEASE_PLZ_GITHUB_TOKEN` so the generated pull request can trigger the release workflow when merged.
